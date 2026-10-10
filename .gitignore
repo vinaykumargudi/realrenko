@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+nifty50_candlestick_data.csv
+bars.json
+bars.html
+*.egg-info/
