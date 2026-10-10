@@ -1,5 +1,35 @@
-# RealRenko — exact percentage blocks with full-size gaps
+# RealRenko — continuous percentage bricks, daily remainders and full-size gaps
 
+
+## Version 2.2: always show the daily remainder
+
+The Renko chart now draws touching, wick-free rectangles. It always includes
+**full percentage bricks → daily remainder → next opening gap**, so each
+brick's close equals the next brick's open. Weekends and overnight intervals
+have no empty time slots. Remainders are lighter green/red bricks, gap ups are
+blue, gap downs are purple, and a flat session is a horizontal tick at its
+unchanged price. A large gap remains one large brick.
+
+For a **3%** setting, assuming a steady move from an opening price of 100:
+
+| Day's close | Day's bricks | Next open at +1% | Gap brick |
+| --- | --- | --- | --- |
+| 102 (+2%) | 100 → 102 remainder | 103.02 | 102 → 103.02 |
+| 104 (+4%) | 100 → 103 full brick; 103 → 104 remainder | 105.04 | 104 → 105.04 |
+| 96 (−4%) | 100 → 97 full brick; 97 → 96 remainder | 96.96 | 96 → 96.96 |
+
+Every percentage is measured from that brick's own open. The 103 → 104
+remainder is **1 price point**, or **0.9708737864%**, and is not rounded to 1%.
+This preserves both the exact 3% full bricks and actual closing prices. A day
+with reversals can create additional full bricks along its minute-close path;
+the examples above describe steady moves, not a rule based only on daily net change.
+
+Python, `/bars`, and CLI exports include remainders by default. The chart
+always includes gaps and remainders, including when opening an older URL with
+`include_partials=false` or `gaps=false`. Explicit sparse API/CLI exports remain
+available through `include_partials=false` / `--no-include-partials`; those
+exports deliberately omit price connections. `kind="partial"` remains the API
+field for a remainder, for compatibility.
 
 ## Interactive chart workspace
 
@@ -14,16 +44,17 @@ no CDN request, paid charting subscription, or frontend build step.
   bars, and **Log** for a logarithmic price scale. Home fits; End shows the latest.
 - Hover for OHLC and timestamps, click a block to pin it, or use the inspector.
 - Add horizontal price levels with the — tool; clear them with the erase button.
-- Percentage presets, date inputs, gap/partial toggles, light/dark mode,
+- Percentage presets (including 3%), date inputs, light/dark mode,
   fullscreen and PNG export are included. Fullscreen availability depends on
   the browser. PNG export captures the chart canvas.
 
 ### See NIFTY's actual long-term movement
 
 The **View** selector offers **Renko blocks**, **NIFTY daily trend**, and
-**NIFTY daily candles**. The **2015–20** shortcut opens the daily price trend
-for that period. This avoids compressing thousands of tiny blocks into an
-unreadable full-history candle plot.
+**NIFTY daily candles**. **Renko blocks** is the default. The **2015–20**
+shortcut keeps your selected view and changes only the date window. To see
+larger individual bricks, zoom in; **Latest blocks** starts with a readable
+recent window. Daily price views remain available through the View selector.
 
 The daily views use real daily OHLC aggregated from the provided minute data
 through `/history`, not percentage-block geometry. Prices are not rebased to
@@ -47,11 +78,13 @@ Open **ƒx Indicators** to enable:
 - **EMA**: adjustable length (default 20), with a first-close recursive seed.
 - **SMA**: adjustable length (default 50), with the normal full-window warm-up.
 
-Daily views calculate on actual daily OHLC. Renko calculates on completed
-percentage blocks and gap bars; partials are excluded. Merely hiding gap bars
-changes visibility, not the indicator input. The controls explicitly identify
-which data the indicators use. Values can differ from another platform using
-a different data feed, candle type, history length or initialization.
+Daily views calculate on actual daily OHLC. Renko indicators calculate on all
+full bricks, daily remainders, and gap bars, including the current unfinished
+remainder. That last remainder and its indicator values can change when more
+minutes arrive. A period counts bricks, not minutes or days. The controls
+identify this input. These are indicators on this custom Renko variant; values
+can differ from a standard Renko platform or a different data feed, candle
+type, history length or initialization.
 
 All available earlier history is loaded for indicator warm-up before applying
 the date window; panning/zooming never restarts an indicator. Insufficient ATR
@@ -71,11 +104,17 @@ internal coordinates to each displayed bar. Multiple bricks confirmed in one
 minute remain separate; labels and crosshair dates map back to real IST times.
 Internal coordinates are never presented as market timestamps.
 
+`static/renko-series.mjs` implements full-width brick rendering using the
+[custom series API](https://tradingview.github.io/lightweight-charts/docs/5.0/plugins/custom_series).
+Rectangles share horizontal boundaries; their height comes from the exact
+open/close price coordinates. A minimum one-pixel stroke keeps flat or tiny
+bricks visible without changing stored prices. There are no source wicks.
+
 `static/indicators.mjs` holds the testable indicator calculations.
 The bundled chart library, Apache-2.0 license, and TradingView copyright notice
 are in `static/vendor/`. Required attribution remains visible in the UI.
 
-Python checks (18 tests): `python -m unittest -v` after installing
+Python checks (21 tests): `python -m unittest -v` after installing
 `requirements-dev.txt`. Optional frontend developer checks (Node 20+):
 
 ```bash
@@ -83,9 +122,9 @@ npm ci
 npm test
 ```
 
-Seven frontend tests cover hand-calculated indicators, no-lookahead behavior,
-actual chart OHLC, duplicate-time bricks, historical price levels, and DOM
-control interactions. The DOM smoke test uses a stubbed chart engine. A real
+Eight frontend tests cover hand-calculated indicators, no-lookahead behavior,
+actual chart OHLC, duplicate-time bricks, historical price levels, touching
+rectangle geometry at different pixel ratios, and DOM control interactions. The DOM smoke test uses a stubbed chart engine. A real
 browser/canvas visual and gesture check was not available in the build
 environment; the test is not a substitute for that check.
 
@@ -104,7 +143,7 @@ minimum and allowed normal 1.3%, 1.4%, and 2.18% bars. That behavior was wrong
 for the requested chart and has been removed.
 
 Excess movement carries into subsequent blocks within the session. Gap bars
-keep their complete size. Partial remainders are hidden by default.
+keep their complete size. Daily and final remainders are shown by default.
 
 **OHLC semantics changed:** normal blocks now have calculated, wick-free OHLC.
 Actual source highs/lows remain separately available in `observed_ohlc` and
@@ -133,12 +172,12 @@ python nifty_bars.py --serve
 ```
 
 Restarting matters: an existing process still holds the previous code and
-cached results. Version 2 JSON identifies itself with
-`metadata.mode = "exact_percentage_close"` and `algorithm_version = "2.0.0"`.
+cached results. Current JSON identifies itself with
+`metadata.mode = "exact_percentage_close"` and `algorithm_version = "2.2.0"`.
 
 - JSON: http://127.0.0.1:8000/bars?percentage=1
 - Chart: http://127.0.0.1:8000/chart?percentage=1&start=2020-03-01&end=2020-03-31
-- Include remainders: http://127.0.0.1:8000/chart?percentage=1&include_partials=true
+- Continuous 3% Renko: http://127.0.0.1:8000/chart?percentage=3
 - API docs: http://127.0.0.1:8000/docs
 
 `1` means 1%, `0.5` means 0.5%; `1%` is also accepted (encode `%` as `%25`
@@ -189,7 +228,8 @@ For each completed normal block:
   round prices before plotting or recalculate thresholds from rounded values.
 
 A source minute whose high crosses a level but whose close does not cross it
-will not produce a block. Multiple blocks from one close share `known_at`; no
+will not confirm a full percentage brick. Its closing displacement stays in the
+remainder, which is emitted at session/data boundaries and at end of input. Multiple blocks from one close share `known_at`; no
 intraminute crossing order or timestamps are fabricated.
 
 ## Gap handling and session reset
@@ -214,9 +254,12 @@ These gap bodies do not claim trades occurred at intermediate prices.
 
 **Session reset remains enabled.** Remainders carry between minutes within a
 session, but do not carry across overnight or missing-data boundaries. They
-are retained as partial records and hidden by default; request
-`include_partials=true` or CLI `--include-partials` to inspect them. Consequently,
-not every observed price change creates a displayed normal block.
+are emitted as remainder bricks before the next gap and are always displayed
+in the chart. If the entire session stays below the threshold, its net closing
+move still appears as a remainder. A flat session retains a zero-height record.
+If the last source minute already ended exactly at a full brick boundary, no
+extra zero-height remainder is needed. Missing data is still identified as an
+unknown-interval bridge; the converter does not invent its intraminute path.
 
 ## Output and plotting
 
@@ -225,7 +268,7 @@ not every observed price change creates a displayed normal block.
 | `move` | Exact-percentage completed normal block | Green/red |
 | `session_gap` | Unsplit normal-session endpoint gap | Blue/purple |
 | `data_gap` | Unsplit unknown-interval endpoint bridge | Amber |
-| `partial` | Unfinished residual, only when requested | Grey |
+| `partial` | Daily/final remainder, always shown in the chart | Lighter green/red (flat: grey) |
 
 The x-axis uses equal positions for returned blocks; elapsed time varies.
 Hover labels include OHLC, percentage, timestamps and bar type. Every normal
@@ -251,7 +294,7 @@ Key fields:
 
 Pass completed input minutes only. This is a batch converter, without persisted
 live-stream/chunk continuation state. `metadata.bar_counts` counts all types,
-including hidden partials; `returned_bar_counts` describes the actual response.
+including remainders; `returned_bar_counts` describes the actual response.
 
 ## Source data and explicit cleaning
 
@@ -287,7 +330,7 @@ blocks = result["bars"]
 
 ```bash
 python nifty_bars.py --percentage 1 --output bars.json --html bars.html
-python nifty_bars.py --percentage 1 --include-partials --output bars.json
+python nifty_bars.py --percentage 3 --output bars_3pct.json
 python -m pip install -r requirements-dev.txt
 python -m unittest -v
 python validate_source.py --csv nifty50_candlestick_data.csv --percentage 1 --output validation.json
@@ -306,3 +349,11 @@ and range is 1%, with maximum floating-point error approximately 2.31e-14
 percentage points. All 852,083 normalized minutes are accounted for with
 partials included. See `examples/validation_1pct.json` for checks and source
 SHA-256. These counts are conversion results, not strategy returns.
+
+
+The version 2.2 **3%** source audit checked **47 full bricks**, **2,317
+remainders**, and **2,314 session/data-gap bridges**. All **4,677 adjacent
+price connections** match exactly in the returned JSON; all **852,083 source
+minutes** are accounted for. Full bricks remain exactly 3% to floating-point
+precision. See `examples/validation_3pct.json`. These are dataset validation
+counts, not performance results.

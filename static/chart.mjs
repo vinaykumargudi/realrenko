@@ -1,5 +1,6 @@
 import { chartPoints, selectBars, indexForTime, earlierMonth, priceChange } from './chart-data.mjs';
 import { supertrend, ema, sma } from './indicators.mjs';
+import { RenkoSeries } from './renko-series.mjs';
 
 const $ = id => document.getElementById(id);
 const L = window.LightweightCharts;
@@ -95,7 +96,7 @@ function inspect(b) {
     text('block-kind', 'No block selected'); return;
   }
   state.selected = b;
-  const kinds = { move: 'Normal block', session_gap: 'Session gap', data_gap: 'Unknown interval', partial: 'Partial block', price: 'Daily price' };
+  const kinds = { move: 'Full brick', session_gap: 'Session gap', data_gap: 'Unknown interval', partial: b.finalized === false ? 'Current remainder' : 'Session remainder', price: 'Daily price' };
   for (const k of ['open','high','low','close']) { text(`legend-${k}`, format(b[k])); text(`detail-${k}`, format(b[k])); }
   text('legend-move', percent(b.move_pct)); paintChange($('legend-move'), b.move_pct);
   text('detail-price', format(b.close));
@@ -109,7 +110,7 @@ function inspect(b) {
   text('block-explanation', b.kind === 'move' ? 'An exact percentage block. Excess movement continues into the next block.'
     : b.kind === 'session_gap' ? 'Full gap from the previous observed close to the next session open. It is not split into smaller blocks.'
     : b.kind === 'data_gap' ? 'An interval is missing or has nonstandard session times. This bar connects its known endpoints.'
-    : b.kind === 'partial' ? 'An unfinished remainder below your block size. This is not a completed percentage block.'
+    : b.kind === 'partial' ? `The remaining move from the last brick boundary to the observed close. Shown at its exact size; the percentage uses this brick’s own open.${b.finalized === false ? ' This last remainder can change as more minutes arrive.' : ''}${b.open === b.close ? ' Price is unchanged, so this brick is a horizontal tick.' : ''}`
     : b.complete_normal_session ? 'Observed daily OHLC, aggregated from the source minute candles.' : 'Observed daily OHLC. This date has incomplete or nonstandard session coverage.');
   updateIndicatorLegend(b);
 }
@@ -127,7 +128,7 @@ function updateIndicatorLegend(bar) {
   }
 }
 function prepareStudies() {
-  const input = state.raw.filter(b => b.kind !== 'partial'); // Gap visibility doesn't change the math.
+  const input = state.raw; // Include all bricks, daily remainders and unsplit gaps.
   const s = state.studies;
   const st = s.supertrend ? supertrend(input, s.atrPeriod, s.factor) : [];
   const e = s.ema ? ema(input, s.emaPeriod) : [];
@@ -177,22 +178,22 @@ function shareURL() {
   if ($('start-date').value) q.set('start', $('start-date').value);
   if ($('end-date').value) q.set('end', $('end-date').value);
   if ($('view-mode').value !== 'renko') q.set('view', $('view-mode').value);
-  if ($('show-partials').checked) q.set('include_partials', 'true');
-  if (!$('show-gaps').checked) q.set('gaps', 'false');
   history.replaceState(null, '', `/chart?${q}`);
-  const dataQuery = new URLSearchParams(q); dataQuery.delete('view'); dataQuery.delete('gaps');
+  const dataQuery = new URLSearchParams(q); dataQuery.delete('view');
+  if (state.type === 'renko') dataQuery.set('include_partials', 'true');
   if (state.type !== 'renko') { dataQuery.delete('percentage'); dataQuery.delete('include_partials'); }
   $('json-link').href = `${state.type === 'renko' ? '/bars' : '/history'}?${dataQuery}`;
 }
 function render(reset = true) {
   if (!state.metadata) return;
   const previousRange = chart.timeScale().getVisibleLogicalRange();
-  state.rows = selectBars(state.raw, { start: $('start-date').value, end: $('end-date').value,
-    gaps: state.type !== 'renko' || $('show-gaps').checked, partials: state.type === 'renko' && $('show-partials').checked });
+  state.rows = selectBars(state.raw, { start: $('start-date').value, end: $('end-date').value });
   for (const s of state.overlays) chart.removeSeries(s); state.overlays = [];
   if (state.series) chart.removeSeries(state.series);
   state.points = chartPoints(state.rows, colors());
-  state.series = $('view-mode').value === 'daily-line'
+  state.series = state.type === 'renko'
+    ? chart.addCustomSeries(new RenkoSeries(L.customSeriesDefaultOptions), { priceLineVisible: true, priceFormat: { type: 'price', precision: 2, minMove: .01 } })
+    : $('view-mode').value === 'daily-line'
     ? chart.addSeries(L.AreaSeries, { lineColor: colors().blue, topColor: colors().blue + '35', bottomColor: colors().blue + '00', lineWidth: 2, priceLineVisible: true })
     : chart.addSeries(L.CandlestickSeries, { upColor: colors().green, downColor: colors().red, borderVisible: false, priceLineVisible: true, priceFormat: { type: 'price', precision: 2, minMove: .01 } });
   state.series.setData($('view-mode').value === 'daily-line'
@@ -202,17 +203,17 @@ function render(reset = true) {
   state.pinned = false; $('unpin-button').hidden = true;
   const counts = state.rows.reduce((a, b) => { a[b.kind] = (a[b.kind] || 0) + 1; return a; }, {});
   text('chart-mode', state.type === 'renko' ? `${state.metadata.percentage}% Renko` : $('view-mode').value === 'daily-line' ? 'Daily price trend' : 'Daily candles');
-  document.querySelector('.mode-tag').textContent = state.type === 'renko' ? 'Close based' : 'Observed OHLC';
+  document.querySelector('.mode-tag').textContent = state.type === 'renko' ? 'Remainders + gaps' : 'Observed OHLC';
   text('count-moves', String(counts.move || counts.price || 0)); $('count-moves').previousElementSibling.textContent = state.type === 'renko' ? 'Normal blocks' : 'Trading dates';
   text('count-gaps', String(counts.session_gap || 0)); text('count-unknown', String(counts.data_gap || 0));
-  text('count-partials', state.type === 'renko' && $('show-partials').checked ? String(counts.partial || 0) : 'Hidden');
+  text('count-partials', String(counts.partial || 0));
   text('dataset-dates', `${dateLabel(state.metadata.first_minute)} — ${dateLabel(state.metadata.last_minute)}`);
   const change = priceChange(state.rows), changeElement = $('window-return').querySelector('b');
   changeElement.textContent = percent(change); paintChange(changeElement, change);
   $('window-return').title = 'First open to last close across the loaded date window; not strategy returns.';
   $('export-button').disabled = !state.rows.length;
   if (!state.rows.length) {
-    overlay('No prices in this window', 'Choose another date range or show partial blocks. The available dataset dates are shown in the inspector.');
+    overlay('No prices in this window', 'Choose a date range within the available dataset dates shown in the inspector.');
     inspect(null); text('status-text', 'No matching data'); $('status-dot').classList.remove('ready');
   } else {
     $('chart-overlay').hidden = true;
@@ -252,8 +253,8 @@ async function loadData() {
   } finally { if (sequence === state.sequence) $('apply-button').disabled = false; }
 }
 function updateModeControls(type) {
-  for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]'), $('show-gaps'), $('show-partials')]) element.disabled = type !== 'renko';
-  text('indicator-basis', type === 'renko' ? 'Completed Renko blocks and gap bars. Partials are excluded; hiding gaps does not change indicator values.' : 'Observed daily OHLC, with all available prior dates used for warm-up.');
+  for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]')]) element.disabled = type !== 'renko';
+  text('indicator-basis', type === 'renko' ? 'All Renko bricks, including daily remainders and gap bars. Values on the current remainder can change with new minutes.' : 'Observed daily OHLC, with all available prior dates used for warm-up.');
 }
 function changeTheme() {
   const dark = document.documentElement.dataset.theme !== 'dark';
@@ -266,12 +267,11 @@ function events() {
   $('retry-button').addEventListener('click', loadData);
   $('view-mode').addEventListener('change', loadData);
   for (const b of document.querySelectorAll('[data-percent]')) b.addEventListener('click', () => { $('percentage').value = b.dataset.percent; loadData(); });
-  for (const id of ['show-gaps','show-partials']) $(id).addEventListener('change', () => render(true));
   for (const button of document.querySelectorAll('[data-range]')) button.addEventListener('click', async () => {
     if (!state.metadata) return;
     for (const b of document.querySelectorAll('[data-range]')) b.classList.toggle('active', b === button);
     if (button.dataset.range === '2015-2020') {
-      $('start-date').value = '2015-01-01'; $('end-date').value = '2020-12-31'; $('view-mode').value = 'daily-line'; await loadData();
+      $('start-date').value = '2015-01-01'; $('end-date').value = '2020-12-31'; await loadData();
     } else {
       const end = state.metadata.last_minute.slice(0, 10);
       $('start-date').value = button.dataset.range === 'all' ? '' : earlierMonth(end, Number(button.dataset.range));
@@ -341,7 +341,6 @@ try {
   const p = Number((q.get('percentage') || '1').replace('%', ''));
   if (Number.isFinite(p) && p > 0 && p < 100) $('percentage').value = String(p);
   $('start-date').value = q.get('start') || ''; $('end-date').value = q.get('end') || '';
-  $('show-partials').checked = q.get('include_partials') === 'true'; $('show-gaps').checked = q.get('gaps') !== 'false';
   if (['daily-line','daily-candles'].includes(q.get('view'))) $('view-mode').value = q.get('view');
   $('details-toggle').setAttribute('aria-pressed', String(!matchMedia('(max-width:900px)').matches));
   initializeChart(); events(); setAuto(true); loadData();

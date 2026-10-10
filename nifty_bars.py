@@ -144,7 +144,7 @@ def validate_candle(c: Candle, previous: Candle | None) -> None:
         raise ValueError(f"Invalid OHLC at {c.timestamp.isoformat()}")
 
 
-def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials=False) -> dict:
+def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials=True) -> dict:
     """Build exact-percentage close-based bricks, carrying excess forward.
 
     Normal OHLC is synthetic: O=anchor, C=anchor*(1 +/- p/100), H=max(O,C),
@@ -154,7 +154,8 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
 
     Session/missing-data gaps stay one unsplit endpoint bridge; reset the
     anchor to the next observed open. Session/end-of-input residuals are
-    partials, hidden by default. No intraminute price path is reconstructed.
+    partials, included by default to connect every price boundary. Flat sessions
+    retain a zero-height partial. No intraminute price path is reconstructed.
     """
     p = parse_percent(percentage)
     fraction = p / HUNDRED
@@ -259,7 +260,7 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
                  if a.time() != time(9, 15) or b.time() != time(15, 29) or n != 375]
     visible = bars if include_partials else [b for b in bars if b["kind"] != "partial"]
     return {"metadata": {
-        "algorithm_version": "2.0.0", "percentage": float(p), "mode": "exact_percentage_close",
+        "algorithm_version": "2.2.0", "percentage": float(p), "mode": "exact_percentage_close",
         "include_partials": include_partials,
         "timezone": "Asia/Kolkata", "timestamp_convention": "minute_start",
         "first_minute": first.timestamp.isoformat(), "last_minute": previous.timestamp.isoformat(),
@@ -276,7 +277,8 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             "Each crossed percentage threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
             "Only minute closes confirm bricks. Multiple bricks from one close share known_at; intraminute crossing times are unknown.",
             "source_minutes counts newly consumed observations; extra bricks from the same minute count zero. Sum counts only with partials included.",
-            "Every session starts a fresh anchor. Partial residuals are hidden by default; request include_partials=true to see them.",
+            "Every session starts a fresh anchor. Daily/final residuals are included by default, followed by unsplit gaps. A flat session retains a zero-height partial.",
+            "Remainder percentages use their own open: 100 to 104 with p=3 gives 100 to 103 (+3%) then 103 to 104 (+0.9708737864%), not a rounded +1% brick.",
             "Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
             "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
             "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
@@ -286,7 +288,7 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
 
 
 def filter_result(result: dict, start: date | None = None, end: date | None = None,
-                  *, include_partials=False) -> dict:
+                  *, include_partials=True) -> dict:
     """Filter AFTER conversion so a chart window cannot alter historical blocks.
 
     Use the event's IST date (end date). Thus a session-gap belongs to its opening
@@ -312,7 +314,7 @@ def make_chart(result: dict):
     fig = go.Figure()
     positions = {b["bar_id"]: i for i, b in enumerate(result["bars"])}
     colors = {"move": ("#15803d", "#dc2626"), "session_gap": ("#2563eb", "#9333ea"),
-              "partial": ("#94a3b8", "#64748b"), "data_gap": ("#d97706", "#d97706")}
+              "partial": ("#86cba0", "#ef9a9a"), "data_gap": ("#d97706", "#d97706")}
     for kind, (up, down) in colors.items():
         rows = [b for b in result["bars"] if b["kind"] == kind]
         if not rows:
@@ -340,7 +342,7 @@ def make_chart(result: dict):
                    ticktext=[b["end"][:16].replace("T", " ") for b in ticks]),
         legend=dict(orientation="h", y=1.08), margin=dict(b=130),
         annotations=[dict(x=0, y=-0.20, xref="paper", yref="paper", showarrow=False,
-                         text="Blue/purple = full session gaps; amber = unknown intervals; grey = partial blocks.")])
+                         text="Blue/purple = full session gaps; amber = unknown intervals; light green/red = remainders.")])
     return fig
 
 
@@ -349,7 +351,7 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
-    app = FastAPI(title="NIFTY percentage OHLC blocks", version="2.1.0")
+    app = FastAPI(title="NIFTY percentage OHLC blocks", version="2.2.0")
     source = Path(csv_path).resolve()
     static = Path(__file__).with_name("static")
     app.mount("/assets", StaticFiles(directory=static), name="assets")
@@ -374,7 +376,7 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
 
     @app.get("/bars")
     def bars(percentage: str = Query("1", description="1 or 1% means one percent"),
-             start: date | None = None, end: date | None = None, include_partials: bool = False):
+             start: date | None = None, end: date | None = None, include_partials: bool = True):
         return get_result(percentage, start, end, include_partials)
 
     @lru_cache(maxsize=1)
@@ -414,7 +416,8 @@ def main():
     parser.add_argument("--html", type=Path, help="Also save an interactive candlestick chart")
     parser.add_argument("--start", type=date.fromisoformat)
     parser.add_argument("--end", type=date.fromisoformat)
-    parser.add_argument("--include-partials", action="store_true", help="Show unfinished residual blocks")
+    parser.add_argument("--include-partials", action=argparse.BooleanOptionalAction, default=True,
+                        help="Include daily/final remainders (default); --no-include-partials creates a sparse export")
     parser.add_argument("--serve", action="store_true", help="Serve /bars, /chart and /docs locally")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()

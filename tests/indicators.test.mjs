@@ -51,5 +51,6 @@ test('Date filters, visibility and long-history percentage preserve actual price
   assert.equal(shown.length,2); assert.equal(priceChange(shown),75);
   assert.equal(earlierMonth('2024-03-31',1),'2024-02-29');
   assert.throws(()=>selectBars(bars,{start:'2021-01-01',end:'2020-01-01'}));
-  assert.equal(selectBars([{end:'2020-01-01',kind:'partial'}]).length,0);
+  assert.equal(selectBars([{end:'2020-01-01',kind:'partial'}]).length,1);
+  assert.equal(selectBars([{end:'2020-01-01',kind:'partial'}],{partials:false}).length,0);
 });

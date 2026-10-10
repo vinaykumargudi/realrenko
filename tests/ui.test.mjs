@@ -32,16 +32,16 @@ function engine() {
         coordinateToPrice:y=>100+y/10,createPriceLine(line){this.lines.push(line);return line;},
         removePriceLine(line){this.lines=this.lines.filter(x=>x!==line);}};
       chart.series.push(series);return series;
-    },removeSeries:s=>{chart.series=chart.series.filter(x=>x!==s);},
+    },addCustomSeries:(view,options)=>{const s=chart.addSeries('renko',options);s.view=view;return s;},removeSeries:s=>{chart.series=chart.series.filter(x=>x!==s);},
     subscribeCrosshairMove:f=>{chart.crosshair=f;},subscribeClick:f=>{chart.click=f;}});
   return {chart,library:{createChart:(element,options)=>{chart.options=options;return chart;},
     ColorType:{Solid:'solid'},LineStyle:{Dashed:2},CrosshairMode:{Magnet:1,Normal:0},
     PriceScaleMode:{Logarithmic:1,Normal:0},LineType:{WithSteps:1,Simple:0},
-    CandlestickSeries:'candle',AreaSeries:'area',LineSeries:'line'}};
+    customSeriesDefaultOptions:{},CandlestickSeries:'candle',AreaSeries:'area',LineSeries:'line'}};
 }
 
 test('Chart controls, data views, indicators, pinning and pan configuration are wired', async () => {
-  const w=new Window({url:'http://localhost/chart?percentage=1',settings:{disableJavaScriptEvaluation:true,
+  const w=new Window({url:'http://localhost/chart?percentage=1&include_partials=false&gaps=false',settings:{disableJavaScriptEvaluation:true,
     disableCSSFileLoading:true,disableJavaScriptFileLoading:true}});
   w.document.write(await readFile(new URL('../static/chart.html',import.meta.url),'utf8'));
   for(const k of ['window','document','history','location','localStorage']) globalThis[k]= k==='window'?w:w[k];
@@ -57,7 +57,10 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
   try {
     await import(`../static/chart.mjs?smoke=${Date.now()}`);await settle();
     assert.equal($('chart-overlay').hidden,true);
-    assert.equal(chart.series[0].type,'candle');assert.equal(chart.series[0].data.length,3);
+    assert.equal(chart.series[0].type,'renko');assert.equal(chart.series[0].data.length,4);
+    assert.equal($('count-partials').textContent,'1');
+    assert.ok(requests[0].includes('include_partials=true'));
+    for(let i=1;i<chart.series[0].data.length;i++) assert.equal(chart.series[0].data[i-1].close,chart.series[0].data[i].open);
     assert.equal(chart.options.handleScroll.pressedMouseMove,true);
     assert.equal(chart.options.handleScroll.vertTouchDrag,true);
     assert.equal(chart.options.handleScale.axisPressedMouseMove.price,true);
@@ -73,15 +76,18 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
     assert.equal($('selection-state').textContent,'Pinned');
     chart.crosshair({time:chart.series[0].data.at(-1).time});assert.equal($('block-id').textContent,'#1');
     $('unpin-button').click();assert.equal($('unpin-button').hidden,true);
-    $('show-gaps').checked=false;change('show-gaps');assert.equal(chart.series[0].data.length,2);
-    for(const p of chart.series[0].data) assert.ok(Math.abs((p.close/p.open-1)*100-1)<1e-10);
-    $('show-partials').checked=true;change('show-partials');assert.equal(chart.series[0].data.length,3);
+    assert.equal($('show-gaps'),null);assert.equal($('show-partials'),null);
     $('supertrend-enabled').checked=true;$('atr-period').value='1';$('atr-factor').value='1';
-    $('ema-enabled').checked=true;
+    $('ema-enabled').checked=true;$('ema-period').value='1';
     submit('indicator-form');
     assert.equal(chart.series.filter(s=>s.type==='line').length,2);
     assert.equal($('indicator-count').textContent,'2');
+    assert.deepEqual(chart.series[2].data.map(p=>p.value),renko.map(b=>b.close));
+    assert.ok(chart.series[1].data.at(-1).value!=null);
     w.document.querySelector('[data-range="2015-2020"]').click();await settle();
+    assert.equal($('view-mode').value,'renko');assert.equal(chart.series[0].type,'renko');
+    assert.equal(chart.series[0].data.length,4);
+    $('view-mode').value='daily-line';change('view-mode');await settle();
     assert.ok(requests.some(x=>x.startsWith('/history')));
     assert.equal($('view-mode').value,'daily-line');assert.equal(chart.series[0].type,'area');
     assert.equal(chart.series[0].data[0].value,8200);assert.equal(chart.series[0].data.at(-1).value,14000);

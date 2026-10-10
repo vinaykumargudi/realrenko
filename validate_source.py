@@ -10,12 +10,14 @@ from nifty_bars import MINUTE, SOURCE_URL, convert_minutes, parse_percent, read_
 
 def audit(path: Path, percentage='1', bars_output: Path | None = None):
     p = parse_percent(percentage)
-    result = convert_minutes(read_minutes(path), p, include_partials=True)
+    result = convert_minutes(read_minutes(path), p)
     minutes = iter(read_minutes(path))
     checked = moves = partials = gaps = 0
     last = None
     max_body_error = 0.0
     for i, b in enumerate(result['bars']):
+        if i:
+            assert result['bars'][i-1]['close'] == b['open'], ('disconnected bricks', i)
         assert b['high'] == max(b['open'], b['close'])
         assert b['low'] == min(b['open'], b['close'])
         assert datetime.fromisoformat(b['known_at']) >= datetime.fromisoformat(b['end'])
@@ -72,13 +74,14 @@ def audit(path: Path, percentage='1', bars_output: Path | None = None):
             'validation': {'all_assertions_passed': True, 'checked_normal_bricks': moves,
                            'checked_partial_bars': partials, 'checked_bridge_bars': gaps,
                            'exactly_once_minute_coverage_including_partials': checked,
+                           'checked_adjacent_price_connections': len(result['bars']) - 1,
                            'maximum_normal_body_error_percentage_points': max_body_error,
                            'checks': ['actual normal OHLC body/range equals requested percentage',
-                                      'normal bricks connect without losing the remainder',
+                                      'every adjacent brick connects, including daily remainders and gaps',
                                       'partial remainder strictly below threshold',
                                       'source OHLC separately reconstructed without assigning wicks',
                                       'minute close confirms each brick; no earlier close already crossed',
-                                      'every minute counted exactly once including hidden partials',
+                                      'every minute counted exactly once with remainders shown by default',
                                       'gap endpoints and full size preserved']}}
     if bars_output:
         bars_output.write_text(json.dumps({'metadata': meta, 'bars': result['bars']}, indent=2, allow_nan=False))

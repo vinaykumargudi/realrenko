@@ -1,0 +1,314 @@
+{
+  "algorithm_version": "2.2.0",
+  "percentage": 3.0,
+  "mode": "exact_percentage_close",
+  "include_partials": true,
+  "timezone": "Asia/Kolkata",
+  "timestamp_convention": "minute_start",
+  "first_minute": "2015-01-09T09:15:00+05:30",
+  "last_minute": "2024-03-27T12:59:00+05:30",
+  "source_minutes": 852083,
+  "observed_sessions": 2282,
+  "source_rows": 852087,
+  "bar_counts": {
+    "partial": 2317,
+    "session_gap": 2257,
+    "data_gap": 57,
+    "move": 47
+  },
+  "returned_bar_counts": {
+    "partial": 2317,
+    "session_gap": 2257,
+    "data_gap": 57,
+    "move": 47
+  },
+  "missing_intraday_intervals": 35,
+  "timestamp_labels_floored_to_minute": 10693,
+  "merged_minute_buckets": [
+    {
+      "minute": "2015-06-29T11:54:00+05:30",
+      "source_rows": 2
+    },
+    {
+      "minute": "2015-08-10T09:36:00+05:30",
+      "source_rows": 2
+    },
+    {
+      "minute": "2015-08-10T10:54:00+05:30",
+      "source_rows": 2
+    },
+    {
+      "minute": "2015-08-13T09:23:00+05:30",
+      "source_rows": 2
+    }
+  ],
+  "sessions_outside_normal_375_minute_template": [
+    {
+      "date": "2015-01-19",
+      "first": "2015-01-19T09:26:00+05:30",
+      "last": "2015-01-19T15:29:00+05:30",
+      "minutes": 364
+    },
+    {
+      "date": "2015-03-13",
+      "first": "2015-03-13T09:15:00+05:30",
+      "last": "2015-03-13T15:29:00+05:30",
+      "minutes": 355
+    },
+    {
+      "date": "2015-03-16",
+      "first": "2015-03-16T09:35:00+05:30",
+      "last": "2015-03-16T15:29:00+05:30",
+      "minutes": 355
+    },
+    {
+      "date": "2015-07-20",
+      "first": "2015-07-20T09:15:00+05:30",
+      "last": "2015-07-20T15:29:00+05:30",
+      "minutes": 370
+    },
+    {
+      "date": "2015-08-24",
+      "first": "2015-08-24T09:15:00+05:30",
+      "last": "2015-08-24T15:29:00+05:30",
+      "minutes": 371
+    },
+    {
+      "date": "2015-09-02",
+      "first": "2015-09-02T09:15:00+05:30",
+      "last": "2015-09-02T15:29:00+05:30",
+      "minutes": 367
+    },
+    {
+      "date": "2015-09-07",
+      "first": "2015-09-07T09:15:00+05:30",
+      "last": "2015-09-07T15:29:00+05:30",
+      "minutes": 367
+    },
+    {
+      "date": "2015-09-16",
+      "first": "2015-09-16T09:15:00+05:30",
+      "last": "2015-09-16T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2015-09-18",
+      "first": "2015-09-18T09:15:00+05:30",
+      "last": "2015-09-18T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2015-09-23",
+      "first": "2015-09-23T09:15:00+05:30",
+      "last": "2015-09-23T15:29:00+05:30",
+      "minutes": 373
+    },
+    {
+      "date": "2015-11-11",
+      "first": "2015-11-11T17:30:00+05:30",
+      "last": "2015-11-11T18:44:00+05:30",
+      "minutes": 72
+    },
+    {
+      "date": "2015-12-22",
+      "first": "2015-12-22T09:15:00+05:30",
+      "last": "2015-12-22T15:29:00+05:30",
+      "minutes": 357
+    },
+    {
+      "date": "2016-10-30",
+      "first": "2016-10-30T18:30:00+05:30",
+      "last": "2016-10-30T19:29:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2017-02-21",
+      "first": "2017-02-21T09:15:00+05:30",
+      "last": "2017-02-21T15:29:00+05:30",
+      "minutes": 336
+    },
+    {
+      "date": "2017-10-19",
+      "first": "2017-10-19T18:30:00+05:30",
+      "last": "2017-10-19T19:29:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2018-11-07",
+      "first": "2018-11-07T17:30:00+05:30",
+      "last": "2018-11-07T18:29:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2019-04-18",
+      "first": "2019-04-18T09:15:00+05:30",
+      "last": "2019-04-18T15:29:00+05:30",
+      "minutes": 372
+    },
+    {
+      "date": "2019-08-02",
+      "first": "2019-08-02T09:15:00+05:30",
+      "last": "2019-08-02T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2019-09-18",
+      "first": "2019-09-18T09:15:00+05:30",
+      "last": "2019-09-18T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2019-09-23",
+      "first": "2019-09-23T09:15:00+05:30",
+      "last": "2019-09-23T15:29:00+05:30",
+      "minutes": 361
+    },
+    {
+      "date": "2019-10-27",
+      "first": "2019-10-27T18:15:00+05:30",
+      "last": "2019-10-27T19:14:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2020-02-13",
+      "first": "2020-02-13T09:15:00+05:30",
+      "last": "2020-02-13T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2020-03-04",
+      "first": "2020-03-04T09:15:00+05:30",
+      "last": "2020-03-04T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2020-08-27",
+      "first": "2020-08-27T09:15:00+05:30",
+      "last": "2020-08-27T15:29:00+05:30",
+      "minutes": 373
+    },
+    {
+      "date": "2020-11-02",
+      "first": "2020-11-02T09:15:00+05:30",
+      "last": "2020-11-02T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2020-11-14",
+      "first": "2020-11-14T18:15:00+05:30",
+      "last": "2020-11-14T19:14:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2021-02-24",
+      "first": "2021-02-24T09:15:00+05:30",
+      "last": "2021-02-24T16:59:00+05:30",
+      "minutes": 129
+    },
+    {
+      "date": "2021-11-04",
+      "first": "2021-11-04T18:15:00+05:30",
+      "last": "2021-11-04T19:14:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2021-12-20",
+      "first": "2021-12-20T09:15:00+05:30",
+      "last": "2021-12-20T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2022-03-07",
+      "first": "2022-03-07T09:15:00+05:30",
+      "last": "2022-03-07T15:29:00+05:30",
+      "minutes": 372
+    },
+    {
+      "date": "2022-10-24",
+      "first": "2022-10-24T18:15:00+05:30",
+      "last": "2022-10-24T19:14:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2023-06-05",
+      "first": "2023-06-05T09:15:00+05:30",
+      "last": "2023-06-05T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2023-06-14",
+      "first": "2023-06-14T09:15:00+05:30",
+      "last": "2023-06-14T15:29:00+05:30",
+      "minutes": 368
+    },
+    {
+      "date": "2023-07-12",
+      "first": "2023-07-12T09:15:00+05:30",
+      "last": "2023-07-12T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2023-07-24",
+      "first": "2023-07-24T09:15:00+05:30",
+      "last": "2023-07-24T15:29:00+05:30",
+      "minutes": 372
+    },
+    {
+      "date": "2023-08-07",
+      "first": "2023-08-07T09:15:00+05:30",
+      "last": "2023-08-07T15:29:00+05:30",
+      "minutes": 374
+    },
+    {
+      "date": "2023-11-12",
+      "first": "2023-11-12T18:15:00+05:30",
+      "last": "2023-11-12T19:14:00+05:30",
+      "minutes": 60
+    },
+    {
+      "date": "2024-03-02",
+      "first": "2024-03-02T09:15:00+05:30",
+      "last": "2024-03-02T12:29:00+05:30",
+      "minutes": 105
+    },
+    {
+      "date": "2024-03-27",
+      "first": "2024-03-27T09:15:00+05:30",
+      "last": "2024-03-27T12:59:00+05:30",
+      "minutes": 225
+    }
+  ],
+  "notes": [
+    "1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision.",
+    "Normal OHLC is a synthetic close-based projection without wicks; observed OHLC is separate and never assigned as a brick's high/low.",
+    "Each crossed percentage threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
+    "Only minute closes confirm bricks. Multiple bricks from one close share known_at; intraminute crossing times are unknown.",
+    "source_minutes counts newly consumed observations; extra bricks from the same minute count zero. Sum counts only with partials included.",
+    "Every session starts a fresh anchor. Daily/final residuals are included by default, followed by unsplit gaps. A flat session retains a zero-height partial.",
+    "Remainder percentages use their own open: 100 to 104 with p=3 gives 100 to 103 (+3%) then 103 to 104 (+0.9708737864%), not a rounded +1% brick.",
+    "Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
+    "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
+    "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
+    "CSV minute-start IST labels are floored; minute collisions use first/max/min/last unless error policy is selected."
+  ],
+  "source_url": "https://raw.githubusercontent.com/sandeepkapri/Nifty50-Minute-Data/refs/heads/main/nifty50_candlestick_data.csv",
+  "source_sha256": "9b347479bb242e8cea8f85011a4d53e8938c1bfea1697fa25d8ef25d8888784d",
+  "validation": {
+    "all_assertions_passed": true,
+    "checked_normal_bricks": 47,
+    "checked_partial_bars": 2317,
+    "checked_bridge_bars": 2314,
+    "exactly_once_minute_coverage_including_partials": 852083,
+    "checked_adjacent_price_connections": 4677,
+    "maximum_normal_body_error_percentage_points": 1.9539925233402755e-14,
+    "checks": [
+      "actual normal OHLC body/range equals requested percentage",
+      "every adjacent brick connects, including daily remainders and gaps",
+      "partial remainder strictly below threshold",
+      "source OHLC separately reconstructed without assigning wicks",
+      "minute close confirms each brick; no earlier close already crossed",
+      "every minute counted exactly once with remainders shown by default",
+      "gap endpoints and full size preserved"
+    ]
+  }
+}

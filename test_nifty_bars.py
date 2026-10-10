@@ -1,6 +1,9 @@
 import tempfile
 import unittest
-from datetime import date, datetime
+import subprocess
+import sys
+import json
+from datetime import date, datetime, timedelta
 from decimal import Decimal as D
 from pathlib import Path
 
@@ -51,10 +54,10 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue(b['synthetic_ohlc'])
         self.assertEqual(convert_minutes([c('2024-01-01T09:15', '0.1', close='0.101')])['bars'][0]['kind'], 'move')
 
-    def test_no_premature_rounding_and_default_hides_partial(self):
+    def test_no_premature_rounding_and_default_shows_partial(self):
         rows = [c('2024-01-01T09:15', 100, close='100.999999')]
-        self.assertEqual(convert_minutes(rows)['bars'], [])
-        self.assertEqual(full(rows)['bars'][0]['kind'], 'partial')
+        self.assertEqual(convert_minutes(rows, include_partials=False)['bars'], [])
+        self.assertEqual(convert_minutes(rows)['bars'][0]['kind'], 'partial')
 
     def test_multiple_compounded_bricks_from_one_close(self):
         result = full([c('2024-01-01T09:15', 100, close=103.2)])
@@ -90,7 +93,7 @@ class ConversionTests(unittest.TestCase):
                 self.assertEqual((gap[0]['open'], gap[0]['close']), (100, next_open))
                 self.assertTrue(gap[0]['synthetic_bridge'])
                 self.assertEqual(sum(b['source_minutes'] for b in bars), 2)
-                self.assertEqual(len(convert_minutes(rows)['bars']), 1)
+                self.assertEqual(len(convert_minutes(rows)['bars']), 3)
 
     def test_gap_uses_actual_close_after_residual_and_resets_anchor(self):
         rows = [c('2024-01-01T15:29', 99.5, close=100),
@@ -102,7 +105,7 @@ class ConversionTests(unittest.TestCase):
 
     def test_same_minute_both_thresholds_uses_close_only(self):
         rows = [c('2024-01-01T09:15', 100, 102, 98, 100.1)]
-        self.assertEqual(convert_minutes(rows)['bars'], [])
+        self.assertEqual(convert_minutes(rows, include_partials=False)['bars'], [])
         b = full(rows)['bars'][0]
         self.assertEqual(b['observed_ohlc']['high'], 102)
         self.assertEqual(b['observed_ohlc']['low'], 98)
@@ -116,7 +119,7 @@ class ConversionTests(unittest.TestCase):
 
     def test_incomplete_session_endpoints_flag_unknown_gap(self):
         rows = [c('2024-01-01T14:00', 100), c('2024-01-02T09:15', 103)]
-        self.assertEqual(convert_minutes(rows)['bars'][0]['kind'], 'data_gap')
+        self.assertEqual(convert_minutes(rows)['bars'][1]['kind'], 'data_gap')
 
     def test_small_session_gap_preserved_and_zero_gap_omitted(self):
         for price, expected in ((100.1, 1), (100, 0)):
@@ -128,6 +131,48 @@ class ConversionTests(unittest.TestCase):
             for close in (90, 110):
                 bars = convert_minutes([c('2024-01-01T09:15', 100, close=close)], percentage)['bars']
                 self.assertGreater(len(self.assert_exact(bars, percentage)), 1)
+
+    def test_three_percent_daily_remainders_then_full_opening_gap(self):
+        for change in (2, 4, -2, -4):
+            for gap_pct in (1, -1, 8, -8):
+                with self.subTest(change=change, gap_pct=gap_pct):
+                    start = datetime(2024, 1, 1, 9, 15, tzinfo=IST)
+                    rows, price = [], D(100)
+                    for i in range(375):
+                        close = D(100) + D(change) * D(i + 1) / D(375)
+                        rows.append(Candle(start + timedelta(minutes=i), price,
+                                           max(price, close), min(price, close), close))
+                        price = close
+                    next_open = price * (1 + D(gap_pct) / D(100))
+                    rows.append(c('2024-01-02T09:15', next_open))
+                    result = convert_minutes(rows, 3)
+                    bars = result['bars']
+                    kinds = (['move'] if abs(change) == 4 else []) + ['partial', 'session_gap', 'partial']
+                    self.assertEqual([b['kind'] for b in bars], kinds)
+                    self.assert_exact(bars, 3)
+                    for a, b in zip(bars, bars[1:]):
+                        self.assertEqual(a['close'], b['open'])
+                    remainder, gap = bars[-3:-1]
+                    self.assertEqual(remainder['close'], 100 + change)
+                    self.assertTrue(remainder['finalized'])
+                    if abs(change) == 4:
+                        anchor = 103 if change > 0 else 97
+                        self.assertEqual(remainder['open'], anchor)
+                        self.assertAlmostEqual(remainder['move_pct'], (100 + change - anchor) / anchor * 100)
+                    else:
+                        self.assertEqual(remainder['move_pct'], change)
+                    self.assertEqual(gap['move_pct'], gap_pct)
+                    self.assertEqual(gap['close'], float(next_open))
+                    self.assertEqual(sum(b['source_minutes'] for b in bars), 376)
+                    self.assertEqual(filter_result(result)['bars'], bars)
+
+    def test_flat_days_remain_visible_and_exact_threshold_needs_no_extra_remainder(self):
+        bars = convert_minutes([c('2024-01-01T15:29', 100), c('2024-01-02T09:15', 100)], 3)['bars']
+        self.assertEqual([b['kind'] for b in bars], ['partial', 'partial'])
+        self.assertTrue(all(b['open'] == b['close'] == 100 for b in bars))
+        exact = convert_minutes([c('2024-01-01T15:29', 100, close=103), c('2024-01-02T09:15', '104.03')], 3)['bars']
+        self.assertEqual([b['kind'] for b in exact], ['move', 'session_gap', 'partial'])
+        self.assertEqual(exact[0]['close'], exact[1]['open'])
 
     def test_reject_invalid_inputs(self):
         for p in (0, -1, 'NaN', 'Infinity', 100, 'bad'):
@@ -169,6 +214,23 @@ class ConversionTests(unittest.TestCase):
 class IntegrationTests(unittest.TestCase):
     assert_exact = ConversionTests.assert_exact
 
+    def test_cli_includes_remainders_without_extra_flags(self):
+        from fastapi.testclient import TestClient
+        with tempfile.TemporaryDirectory() as temp:
+            source, output = Path(temp) / 'source.csv', Path(temp) / 'bars.json'
+            source.write_text('Instrument,Date,Time,Open,High,Low,Close\n'
+                              'Nifty50,01-01-2024,15:29:00,100,104,100,104\n'
+                              'Nifty50,02-01-2024,09:15:00,105.04,105.04,105.04,105.04\n')
+            command = [sys.executable, str(Path(__file__).with_name('nifty_bars.py')),
+                       '--csv', str(source), '--output', str(output), '--percentage', '3']
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            result = json.loads(output.read_text())
+            self.assertEqual([b['kind'] for b in result['bars']], ['move', 'partial', 'session_gap', 'partial'])
+            client_result = TestClient(create_app(source)).get('/bars?percentage=3').json()
+            self.assertEqual(client_result['bars'], result['bars'])
+            subprocess.run(command + ['--no-include-partials'], check=True, capture_output=True, text=True)
+            self.assertEqual([b['kind'] for b in json.loads(output.read_text())['bars']], ['move', 'session_gap'])
+
     def test_api_and_plot_actual_bodies_not_only_labels(self):
         from fastapi.testclient import TestClient
         with tempfile.TemporaryDirectory() as temp:
@@ -182,7 +244,9 @@ class IntegrationTests(unittest.TestCase):
             result = r.json()
             self.assertEqual(result['metadata']['mode'], 'exact_percentage_close')
             self.assertTrue(self.assert_exact(result['bars']))
-            self.assertNotIn('partial', [b['kind'] for b in result['bars']])
+            self.assertIn('partial', [b['kind'] for b in result['bars']])
+            sparse = client.get('/bars?percentage=1&include_partials=false').json()
+            self.assertNotIn('partial', [b['kind'] for b in sparse['bars']])
             gap = next(b for b in result['bars'] if b['kind'] == 'session_gap')
             self.assertEqual(gap['move_pct'], 3)
             self.assertEqual(client.get('/bars?percentage=NaN').status_code, 422)
@@ -202,7 +266,7 @@ class IntegrationTests(unittest.TestCase):
             for o, h, l, close in zip(normal.open, normal.high, normal.low, normal.close):
                 self.assertAlmostEqual(abs(close / o - 1) * 100, 1, places=10)
                 self.assertAlmostEqual((h - l) / o * 100, 1, places=10)
-            self.assertNotIn('partial', [t.name for t in fig.data])
+            self.assertIn('partial', [t.name for t in fig.data])
             path.unlink()
             self.assertEqual(client.get('/bars').status_code, 503)
 

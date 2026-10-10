@@ -3,7 +3,7 @@
 export const AXIS_BASE = 1577836800;
 export const AXIS_STEP = 60;
 
-export function selectBars(bars, { start = '', end = '', gaps = true, partials = false } = {}) {
+export function selectBars(bars, { start = '', end = '', gaps = true, partials = true } = {}) {
   if (start && end && start > end) throw new Error('The start date must be before the end date.');
   return bars.filter(b => (!start || b.end.slice(0, 10) >= start)
     && (!end || b.end.slice(0, 10) <= end)
@@ -13,11 +13,11 @@ export function selectBars(bars, { start = '', end = '', gaps = true, partials =
 export function chartPoints(bars, colors) {
   return bars.map((b, i) => {
     if (![b.open, b.high, b.low, b.close].every(Number.isFinite)) throw new Error('The dataset contains an invalid price.');
-    const color = b.kind === 'data_gap' ? colors.amber : b.kind === 'partial' ? colors.muted
+    const color = b.kind === 'data_gap' ? colors.amber : b.close === b.open ? colors.muted
       : b.kind === 'session_gap' ? (b.close >= b.open ? colors.blue : colors.purple)
       : (b.close >= b.open ? colors.green : colors.red);
     return { time: AXIS_BASE + i * AXIS_STEP, open: b.open, high: b.high, low: b.low,
-      close: b.close, color, borderColor: color, wickColor: color };
+      close: b.close, color, borderColor: color, wickColor: color, remainder: b.kind === 'partial' };
   });
 }
 
