@@ -335,7 +335,7 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
                  if a.time() != time(9, 15) or b.time() != time(15, 29) or n != 375]
     visible = bars if include_partials else [b for b in bars if b["kind"] != "partial"]
     result = {"metadata": {
-        "algorithm_version": "2.5.0", "percentage": float(p) if p is not None else None,
+        "algorithm_version": "2.6.0", "percentage": float(p) if p is not None else None,
         "mode": "exact_percentage_close" if p is not None else "prior_daily_atr_close",
         "sizing": sizing, "session_mode": session_mode, "pending_move": pending,
         "absorbed_small_session_gaps": absorbed_gaps, "absorbed_unknown_intervals": absorbed_unknown,
@@ -475,24 +475,28 @@ def local_metadata(path: Path, expected_symbol: str | None = None) -> dict:
 
 
 def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
-               default_symbol="NIFTY50", source_symbol="NIFTY50"):
+               default_symbol="NIFTY50", source_symbol="NIFTY50", default_provider="kaggle", chart_defaults=None):
     """Local API with explicit stock downloads and immutable per-symbol snapshots."""
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
     from stock_data import DEFAULT_DATA, DownloadError, cached_stock, download_stock, normalize_symbol
-    app = FastAPI(title="RealRenko stock and index OHLC blocks", version="2.5.0")
+    from historical_data import download_history_stock, provider_directory
+    provider_directory(default_provider)
+    chart_defaults = dict(chart_defaults or {})
+    app = FastAPI(title="RealRenko stock and index OHLC blocks", version="2.6.0")
     source = Path(csv_path).resolve()
     stock_dir = Path(stock_dir) if stock_dir is not None else DEFAULT_DATA
     default_symbol, source_symbol = normalize_symbol(default_symbol), normalize_symbol(source_symbol)
     static = Path(__file__).with_name("static")
     app.mount("/assets", StaticFiles(directory=static), name="assets")
 
-    def resolve_source(symbol):
+    def resolve_source(symbol, provider):
         symbol = normalize_symbol(symbol)
+        directory = provider_directory(provider, stock_dir)
         if symbol == source_symbol:
             return source, local_metadata(source, symbol)
-        return cached_stock(symbol, stock_dir)
+        return cached_stock(symbol, directory)
 
     @lru_cache(maxsize=4)
     def calculate(path: str, symbol: str, sizing: str, p: str, atr_period: int, session_mode: str, mtime_ns: int, size: int):
@@ -503,9 +507,11 @@ def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
         return HTTPException(503, f"No data for {symbol}. Use Download & plot for a stock, or run python nifty_bars.py --download for the original NIFTY CSV.")
 
     @app.post("/download")
-    def download(symbol: str = Query(...), days: int = Query(28, ge=1, le=28)):
+    def download(symbol: str = Query(...), days: int = Query(28, ge=1, description="Recent calendar days for Yahoo only"), provider: str = default_provider):
         try:
-            _, metadata = download_stock(symbol, days, stock_dir)
+            provider_directory(provider, stock_dir)
+            _, metadata = (download_history_stock(symbol, stock_dir) if provider == "kaggle"
+                           else download_stock(symbol, days, stock_dir))
             return {"metadata": metadata}
         except DownloadError as exc:
             raise HTTPException(502, str(exc)) from exc
@@ -519,7 +525,7 @@ def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
              start: date | None = None, end: date | None = None, include_partials: bool = True,
              sizing: str = Query("percentage", description="percentage or atr"),
              atr_period: int = Query(14, ge=1, description="Daily Wilder ATR length; positive whole number"),
-             symbol: str = default_symbol, session_mode: str = "threshold"):
+             symbol: str = default_symbol, session_mode: str = "threshold", provider: str = default_provider):
         try:
             if sizing not in ("percentage", "atr"):
                 raise ValueError("sizing must be 'percentage' or 'atr'")
@@ -527,7 +533,7 @@ def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
             period = parse_atr_period(atr_period) if sizing == "atr" else 14
             if start and end and start > end:
                 raise ValueError("start must be on or before end")
-            path, metadata = resolve_source(symbol)
+            path, metadata = resolve_source(symbol, provider)
             stat = path.stat()
             data = calculate(str(path), metadata["symbol"], sizing, p, period, session_mode, stat.st_mtime_ns, stat.st_size)
             result = filter_result(data, start, end, include_partials=include_partials)
@@ -544,9 +550,9 @@ def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
         return daily_history(path, expected_instrument=symbol)
 
     @app.get("/history")
-    def history(start: date | None = None, end: date | None = None, symbol: str = default_symbol):
+    def history(start: date | None = None, end: date | None = None, symbol: str = default_symbol, provider: str = default_provider):
         try:
-            path, metadata = resolve_source(symbol)
+            path, metadata = resolve_source(symbol, provider)
             stat = path.stat()
             result = filter_result(calculate_history(str(path), metadata["symbol"], stat.st_mtime_ns, stat.st_size), start, end)
             result["metadata"] = {**result["metadata"], **metadata}
@@ -558,13 +564,15 @@ def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
 
     @app.get("/", include_in_schema=False)
     def index():
-        return RedirectResponse("/chart?" + urllib.parse.urlencode({"symbol": default_symbol}))
+        return RedirectResponse("/chart?" + urllib.parse.urlencode({"symbol": default_symbol, "provider": default_provider, **chart_defaults}))
 
     @app.get("/chart", response_class=HTMLResponse)
     def chart():
         import html
         shell = static.joinpath("chart.html").read_text(encoding="utf-8")
         shell = shell.replace('data-default-symbol="NIFTY50"', f'data-default-symbol="{html.escape(default_symbol)}"')
+        shell = shell.replace('data-default-provider="kaggle"', f'data-default-provider="{html.escape(default_provider)}"')
+        shell = shell.replace('data-chart-defaults="{}"', f'data-chart-defaults="{html.escape(json.dumps(chart_defaults))}"')
         return HTMLResponse(shell, headers={"Cache-Control": "no-cache"})
 
     return app
@@ -574,9 +582,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", type=Path, help="Local CSV in the documented schema; use --symbol to check its identity")
     parser.add_argument("--symbol", help="NSE equity symbol, e.g. TCS or RELIANCE; default NIFTY50")
-    parser.add_argument("--days", type=int, default=28, help="Recent calendar days to download (1–28)")
+    parser.add_argument("--provider", choices=("kaggle", "yahoo"), default="kaggle", help="Historical archive (default) or recent Yahoo minute data")
+    parser.add_argument("--days", type=int, default=28, help="Yahoo only: recent calendar days to download (1–28)")
     parser.add_argument("--data-dir", type=Path, help="Directory for per-stock download snapshots")
-    parser.add_argument("--download", action="store_true", help="Download recent stock minutes, or the original NIFTY CSV")
+    parser.add_argument("--download", action="store_true", help="Download available stock minutes from the chosen provider, or the original NIFTY CSV")
     parser.add_argument("--percentage", default="1", help="1 or 1%% means one percent")
     parser.add_argument("--session-mode", choices=("threshold", "daily"), default="threshold", help="Carry unfinished moves (default), or show a remainder every session")
     parser.add_argument("--sizing", choices=("percentage", "atr"), default="percentage", help="Renko brick sizing method")
@@ -591,6 +600,7 @@ def main():
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     from stock_data import DEFAULT_DATA, cached_stock, download_stock, normalize_symbol
+    from historical_data import download_history_stock, provider_directory
     stock_dir = args.data_dir or DEFAULT_DATA
     symbol = normalize_symbol(args.symbol or "NIFTY50")
     custom_csv = args.csv is not None
@@ -599,6 +609,8 @@ def main():
     if args.download:
         if symbol == "NIFTY50":
             download_csv(args.csv or DEFAULT_CSV)
+        elif args.provider == "kaggle":
+            download_history_stock(symbol, stock_dir)
         else:
             download_stock(symbol, args.days, stock_dir)
     if custom_csv or symbol == "NIFTY50":
@@ -606,11 +618,17 @@ def main():
         metadata = local_metadata(args.csv, args.symbol) if args.csv.exists() else {}
         symbol = metadata.get("symbol", symbol)
     else:
-        args.csv, metadata = cached_stock(symbol, stock_dir)
+        args.csv, metadata = cached_stock(symbol, provider_directory(args.provider, stock_dir))
     if args.serve:
         import uvicorn
         uvicorn.run(create_app(args.csv if custom_csv else DEFAULT_CSV, stock_dir=stock_dir,
-                               default_symbol=symbol, source_symbol=symbol if custom_csv else "NIFTY50"),
+                               default_symbol=symbol, source_symbol=symbol if custom_csv else "NIFTY50",
+                               default_provider=args.provider, chart_defaults={
+                                   "percentage": args.percentage, "sizing": args.sizing,
+                                   "atr_period": args.atr_period, "session_mode": args.session_mode,
+                                   **({"start": str(args.start)} if args.start else {}),
+                                   **({"end": str(args.end)} if args.end else {}),
+                               }),
                     host="127.0.0.1", port=args.port)
         return
     result = filter_result(convert_minutes(read_minutes(args.csv, expected_instrument=symbol), args.percentage, include_partials=True,

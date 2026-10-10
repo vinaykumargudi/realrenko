@@ -88,7 +88,7 @@ class StockTests(unittest.TestCase):
             for symbol in ('TCS', 'INFY'):
                 with patch('stock_data._fetch', return_value=response(symbol=symbol, prices=[100 if symbol == 'TCS' else 200])):
                     download_stock(symbol, 7, cache, now=NOW)
-            client = TestClient(create_app(Path(directory) / 'missing.csv', stock_dir=cache, default_symbol='TCS'))
+            client = TestClient(create_app(Path(directory) / 'missing.csv', stock_dir=cache, default_symbol='TCS', default_provider='yahoo'))
             for symbol, price in [('TCS', 100), ('INFY', 200)]:
                 r = client.get('/bars', params={'symbol': symbol, 'percentage': 2}).json()
                 self.assertEqual(r['metadata']['symbol'], symbol)

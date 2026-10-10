@@ -1,0 +1,297 @@
+{
+  "source": {
+    "symbol": "TCS",
+    "instrument": "TCS",
+    "display_name": "TCS",
+    "provider": "kaggle",
+    "instrument_type": "equity",
+    "currency": "INR",
+    "exchange": "NSE",
+    "source_provider": "Kaggle community minute archive",
+    "source_url": "https://www.kaggle.com/datasets/debashis74017/stock-market-data-nifty-50-stocks-1-min-data",
+    "interval": "1m",
+    "timezone": "Asia/Kolkata",
+    "downloaded_at": "2026-10-10T17:36:36.505814+00:00",
+    "source_sha256": "3ad954ca616106219144200d80f53f59c7b0aaac9961d53b772f4352703c8ecf",
+    "downloaded_minutes": 1033323,
+    "archive_source_rows": 1033700,
+    "first_minute": "2015-02-02T09:15:00+05:30",
+    "last_minute": "2026-04-08T15:29:00+05:30",
+    "history_complete_since_listing": false,
+    "observed_sessions": 2768,
+    "complete_regular_sessions": 2725,
+    "incomplete_or_special_sessions": 43,
+    "timestamp_labels_floored_to_minute": 45,
+    "merged_source_rows": 2,
+    "excluded_zero_ohlcv_rows": 375,
+    "excluded_zero_ohlcv_dates": {
+      "2015-02-09": 375
+    },
+    "adjacent_one_minute_fraction": 0.9999514824536293,
+    "price_adjustment": "Archive prices as supplied. Historical corporate-action adjustment basis is not independently verified; no local adjustment or interpolation.",
+    "source_limitations": "Available archive history only, not complete listing-to-present coverage. Community prices are not exchange-certified. Missing records and earlier years are not reconstructed. Naive timestamps are interpreted as Asia/Kolkata. ATH* uses this source history only.",
+    "dataset_version": 15,
+    "dataset_updated_at": "2026-04-09T05:25:06.353Z",
+    "download_url": "https://api.kaggle.com/v1/datasets/download/debashis74017/stock-market-data-nifty-50-stocks-1-min-data/TCS_minute.csv?datasetVersionNumber=15",
+    "download_sha256": "9f416113fd28fe258681610688ed31e578045b70f4dba7bb650471db3a433663",
+    "download_bytes": 56676737,
+    "dataset_declared_license": "CC0: Public Domain"
+  },
+  "checks": [
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "percentage",
+        "percentage": 1
+      },
+      "bar_counts": {
+        "move": 4230,
+        "partial": 253,
+        "session_gap": 244,
+        "data_gap": 9
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2571.7428,
+        "last_price": 2561.1,
+        "move_pct": -0.4138360958957482,
+        "source_minutes": 223,
+        "start": "2026-04-08T11:47:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2574.1,
+          "high": 2574.1,
+          "low": 2550.0,
+          "close": 2561.1
+        }
+      }
+    },
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "percentage",
+        "percentage": 2
+      },
+      "bar_counts": {
+        "move": 1228,
+        "partial": 59,
+        "session_gap": 57,
+        "data_gap": 2
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2577.674232,
+        "last_price": 2561.1,
+        "move_pct": -0.6429917246424179,
+        "source_minutes": 373,
+        "start": "2026-04-08T09:17:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2577.2,
+          "high": 2577.7,
+          "low": 2540.1,
+          "close": 2561.1
+        }
+      }
+    },
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "percentage",
+        "percentage": 3
+      },
+      "bar_counts": {
+        "move": 587,
+        "partial": 31,
+        "session_gap": 29,
+        "data_gap": 2
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2568.7584049530537,
+        "last_price": 2561.1,
+        "move_pct": -0.29813644359417935,
+        "source_minutes": 375,
+        "start": "2026-04-08T09:15:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2572.0,
+          "high": 2580.3,
+          "low": 2540.1,
+          "close": 2561.1
+        }
+      }
+    },
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "atr",
+        "atr_period": 7
+      },
+      "bar_counts": {
+        "move": 1120,
+        "partial": 39,
+        "session_gap": 37,
+        "data_gap": 2
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2561.368798365554,
+        "last_price": 2561.1,
+        "move_pct": -0.010494324976768919,
+        "source_minutes": 375,
+        "start": "2026-04-08T09:15:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2572.0,
+          "high": 2580.3,
+          "low": 2540.1,
+          "close": 2561.1
+        }
+      },
+      "independent_daily_atr_matches": true,
+      "no_current_day_atr": true,
+      "last_atr_points": 68.47021463025571,
+      "first_full_brick": "2015-02-13T14:52:00+05:30"
+    },
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "atr",
+        "atr_period": 10
+      },
+      "bar_counts": {
+        "move": 1112,
+        "partial": 40,
+        "session_gap": 38,
+        "data_gap": 2
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2560.5356904125333,
+        "last_price": 2561.1,
+        "move_pct": 0.02203873156619024,
+        "source_minutes": 375,
+        "start": "2026-04-08T09:15:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2572.0,
+          "high": 2580.3,
+          "low": 2540.1,
+          "close": 2561.1
+        }
+      },
+      "independent_daily_atr_matches": true,
+      "no_current_day_atr": true,
+      "last_atr_points": 67.35374809014743,
+      "first_full_brick": "2015-02-18T09:15:00+05:30"
+    },
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "atr",
+        "atr_period": 14
+      },
+      "bar_counts": {
+        "move": 1143,
+        "partial": 41,
+        "session_gap": 39,
+        "data_gap": 2
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2561.3685478288103,
+        "last_price": 2561.1,
+        "move_pct": -0.010484544640711102,
+        "source_minutes": 375,
+        "start": "2026-04-08T09:15:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2572.0,
+          "high": 2580.3,
+          "low": 2540.1,
+          "close": 2561.1
+        }
+      },
+      "independent_daily_atr_matches": true,
+      "no_current_day_atr": true,
+      "last_atr_points": 67.28485636201975,
+      "first_full_brick": "2015-02-24T09:15:00+05:30"
+    },
+    {
+      "request": {
+        "symbol": "TCS",
+        "provider": "kaggle",
+        "sizing": "atr",
+        "atr_period": 21
+      },
+      "bar_counts": {
+        "move": 1115,
+        "partial": 41,
+        "session_gap": 39,
+        "data_gap": 2
+      },
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_partials": true,
+      "pending_move": {
+        "open": 2577.997480421831,
+        "last_price": 2561.1,
+        "move_pct": -0.6554498423740072,
+        "source_minutes": 373,
+        "start": "2026-04-08T09:17:00+05:30",
+        "last_minute": "2026-04-08T15:29:00+05:30",
+        "ath_breakout": null,
+        "observed_ohlc": {
+          "open": 2577.2,
+          "high": 2577.7,
+          "low": 2540.1,
+          "close": 2561.1
+        }
+      },
+      "independent_daily_atr_matches": true,
+      "no_current_day_atr": true,
+      "last_atr_points": 67.34477950414042,
+      "first_full_brick": "2015-03-04T09:15:00+05:30"
+    }
+  ],
+  "independent_exchange_price_verification": false
+}

@@ -123,7 +123,7 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
       assert.ok($('chart-mode').textContent.includes(`ATR(${period})`));
       assert.equal(chart.series[0].data[0].close,100+period);
     }
-    $('brick-atr-period').value='21';submit('controls');await settle();
+    $('brick-atr-period').value='21';change('brick-atr-period');await settle();
     assert.ok(requests.at(-1).includes('atr_period=21'));
     assert.ok(w.location.search.includes('sizing=atr'));
     assert.ok($('json-link').href.includes('atr_period=21'));
@@ -133,6 +133,9 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
     $('sizing-mode').value='percentage';change('sizing-mode');await settle();
     assert.equal($('percentage').disabled,false);assert.equal($('brick-atr-period').disabled,true);
     assert.equal(chart.series[0].data[0].close,101);
+    $('percentage').value='1.5';change('percentage');await settle();
+    assert.ok(requests.at(-1).includes('percentage=1.5'));
+    $('percentage').value='1';change('percentage');await settle();
 
     $('supertrend-enabled').checked=true;$('atr-period').value='1';$('atr-factor').value='1';
     $('ema-enabled').checked=true;$('ema-period').value='1';
@@ -148,7 +151,7 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
     assert.ok(requests.some(x=>x.startsWith('/history')));
     assert.equal($('view-mode').value,'daily-line');assert.equal(chart.series[0].type,'area');
     assert.equal(chart.series[0].data[0].value,8200);assert.equal(chart.series[0].data.at(-1).value,14000);
-    assert.equal($('percentage').disabled,true);
+    assert.equal($('percentage').disabled,false);
     assert.ok($('window-return').textContent.includes('+75.00%'));
     const requestCount=requests.length;
     $('view-mode').value='daily-candles';change('view-mode');await settle();
@@ -166,17 +169,23 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
     assert.equal($('watermark-symbol').textContent,'TCS');assert.equal($('start-date').value,'');
     assert.ok(requests.at(-1).includes('symbol=TCS'));assert.ok(w.location.search.includes('symbol=TCS'));
     assert.ok($('json-link').href.includes('symbol=TCS'));assert.equal(chart.series[0].lines.length,0);
-    assert.equal(w.document.querySelector('[data-range="2015-2020"]').hidden,true);
+    assert.equal(w.document.querySelector('[data-range="2015-2020"]').hidden,false);
     $('view-mode').value='renko';change('view-mode');await settle();
     assert.equal($('pending-note').hidden,false);assert.ok($('pending-note').textContent.includes('no brick drawn'));
     $('download-button').click();await settle();await settle();
     assert.ok(requests.some(x=>x.startsWith('/download?')&&x.includes('symbol=TCS')));
     assert.equal($('symbol-input').disabled,false);assert.equal($('chart-overlay').hidden,true);
-    assert.ok($('download-hint').textContent.includes('6,495'));
+    assert.ok($('download-hint').textContent.includes('available'));
     failDownload=true;$('download-button').click();await settle();await settle();
     assert.equal($('chart-overlay').hidden,false);assert.equal($('overlay-title').textContent,'Download unavailable');
     assert.equal(chart.series.length,0);assert.equal($('download-button').disabled,false);
     submit('instrument-form');await settle();assert.equal($('chart-overlay').hidden,true);
+    $('download-provider').value='yahoo';change('download-provider');await settle();
+    assert.ok(requests.at(-1).includes('provider=yahoo'));
+    assert.equal($('download-days-control').hidden,false);
+    $('download-provider').value='kaggle';change('download-provider');await settle();
+    assert.ok(requests.at(-1).includes('provider=kaggle'));
+    assert.equal($('download-days-control').hidden,true);
     $('symbol-input').value='INFY';submit('instrument-form');await settle();
     assert.equal($('chart-symbol').textContent,'INFY');assert.ok(requests.at(-1).includes('symbol=INFY'));
   } finally { await w.happyDOM.close(); }

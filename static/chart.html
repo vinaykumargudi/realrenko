@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-default-symbol="NIFTY50">
+<html lang="en" data-theme="dark" data-default-symbol="NIFTY50" data-default-provider="kaggle" data-chart-defaults="{}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101319">
   <title>RealRenko · Stock & index charts</title>
-  <link rel="stylesheet" href="/assets/chart.css?v=6">
+  <link rel="stylesheet" href="/assets/chart.css?v=7">
   <script src="/assets/vendor/lightweight-charts-5.2.1.js" defer></script>
-  <script type="module" src="/assets/chart.mjs?v=6"></script>
+  <script type="module" src="/assets/chart.mjs?v=7"></script>
 </head>
 <body>
 <div class="app" id="app">
@@ -26,9 +26,10 @@
     <label for="symbol-input">NSE symbol <input id="symbol-input" list="symbol-list" value="NIFTY50" maxlength="33" required spellcheck="false" autocomplete="off" aria-label="NSE stock symbol"></label>
     <datalist id="symbol-list"><option value="TCS"><option value="RELIANCE"><option value="INFY"><option value="HDFCBANK"><option value="SBIN"><option value="NIFTY50"></datalist>
     <button class="button" type="submit">Load saved</button>
-    <label for="download-days">Recent <select id="download-days" aria-label="Download calendar days"><option value="28">28 days</option><option value="14">14 days</option><option value="7">7 days</option></select></label>
+    <label for="download-provider">Source <select id="download-provider"><option value="kaggle">Historical minute archive</option><option value="yahoo">Yahoo · recent minutes</option></select></label>
+    <label id="download-days-control" for="download-days" hidden>Recent <select id="download-days" aria-label="Download calendar days"><option value="28">28 days</option><option value="14">14 days</option><option value="7">7 days</option></select></label>
     <button class="button export" type="button" id="download-button">↓ Download &amp; plot</button>
-    <span class="source-hint" id="download-hint">TCS or another NSE stock · recent 1-minute data</span>
+    <span class="source-hint" id="download-hint">Available archive years · not complete listing history</span>
   </form>
   <form class="toolbar" id="controls">
     <div class="symbol"><span class="symbol-icon" id="symbol-icon">N</span><div><strong id="symbol-title">NIFTY 50</strong><small id="symbol-exchange">NSE · Index</small></div></div>
@@ -46,6 +47,7 @@
     <button class="icon-button settings-button" type="button" id="details-toggle" title="Show / hide block details" aria-label="Show / hide block details" aria-pressed="true">☷</button>
   </form>
 
+  <div id="sizing-feedback" class="sizing-feedback" role="status" aria-live="polite">Select a size or edit a value to rebuild Renko bricks.</div>
   <div class="study-toolbar">
     <label class="view-picker">View <select id="view-mode" aria-label="Chart view"><option value="renko">Renko blocks</option><option value="daily-line">Daily price trend</option><option value="daily-candles">Daily candles</option></select></label>
     <details class="indicator-menu" id="indicator-menu"><summary>ƒx <span>Indicators</span><b id="indicator-count">0</b></summary><form id="indicator-form" class="indicator-popover"><h3>Indicators</h3><p id="indicator-basis">Calculated on all Renko bricks, remainders and gaps.</p><div class="study-row"><label><input type="checkbox" id="supertrend-enabled"> Supertrend</label><div><label>ATR <input type="number" id="atr-period" min="1" max="500" value="10" required></label><label>Factor <input type="number" id="atr-factor" min="0.1" max="100" step="any" value="3" required></label></div></div><div class="study-row"><label><input type="checkbox" id="ema-enabled"> EMA</label><label>Length <input type="number" id="ema-period" min="1" max="1000" value="20" required></label></div><div class="study-row"><label><input type="checkbox" id="sma-enabled"> SMA</label><label>Length <input type="number" id="sma-period" min="1" max="1000" value="50" required></label></div><button class="button primary" type="submit">Apply indicators</button><span class="study-hint">Indicators use all loaded history for warm-up.</span></form></details>

@@ -9,7 +9,7 @@ const dateLabel = iso => iso ? new Intl.DateTimeFormat('en-GB', { day: '2-digit'
 const timeLabel = iso => iso ? new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date(iso)) : '—';
 const format = value => Number.isFinite(value) ? number.format(value) : '—';
 const percent = value => Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}%` : '—';
-const state = { symbol: 'NIFTY50', downloading: false, raw: [], rows: [], points: [], metadata: null, type: '', key: '', series: null, overlays: [], markers: null,
+const state = { symbol: 'NIFTY50', provider: 'kaggle', downloading: false, raw: [], rows: [], points: [], metadata: null, type: '', key: '', series: null, overlays: [], markers: null,
   controller: null, sequence: 0, selected: null, pinned: false, levels: [], priceLines: [], placing: false,
   auto: true, studyValues: new Map(), studies: { supertrend: false, atrPeriod: 10, factor: 3, ema: false, emaPeriod: 20, sma: false, smaPeriod: 50 } };
 let chart, toastTimer;
@@ -195,7 +195,7 @@ function sizingQuery() {
     : { percentage: $('percentage').value || '1', session_mode: $('session-mode').value };
 }
 function shareURL() {
-  const q = new URLSearchParams({ ...sizingQuery(), symbol: state.symbol });
+  const q = new URLSearchParams({ ...sizingQuery(), symbol: state.symbol, provider: state.provider });
   if ($('start-date').value) q.set('start', $('start-date').value);
   if ($('end-date').value) q.set('end', $('end-date').value);
   if ($('view-mode').value !== 'renko') q.set('view', $('view-mode').value);
@@ -227,6 +227,7 @@ function render(reset = true) {
   state.pinned = false; $('unpin-button').hidden = true;
   const counts = state.rows.reduce((a, b) => { a[b.kind] = (a[b.kind] || 0) + 1; return a; }, {});
   const renkoLabel = state.metadata.sizing === 'atr' ? `ATR(${state.metadata.atr_period}) · daily Renko` : `${state.metadata.percentage}% Renko`;
+  text('sizing-feedback', state.type === 'renko' ? `Applied ${renkoLabel} · ${counts.move || 0} full bricks · change any sizing value to recalculate` : 'Daily prices shown. Choose any brick setting to switch back to Renko.');
   text('chart-mode', state.type === 'renko' ? renkoLabel : $('view-mode').value === 'daily-line' ? 'Daily price trend' : 'Daily candles');
   document.querySelector('.mode-tag').textContent = state.type === 'renko' ? (state.metadata.session_mode === 'daily' ? 'Daily remainders' : 'Confirmed moves') : 'Observed OHLC';
   text('move-policy-label', state.metadata.session_mode === 'daily' ? 'Daily remainders shown' : 'Small moves carry forward');
@@ -267,11 +268,11 @@ async function loadData() {
   if (state.downloading) return;
   const type = $('view-mode').value === 'renko' ? 'renko' : 'daily';
   updateModeControls(type);
-  if (!$('controls').reportValidity()) return;
+  if (!$('controls').reportValidity()) { text('sizing-feedback', 'Enter valid sizing values to update the chart.'); return; }
   if (type === 'renko' && $('sizing-mode').value === 'atr' && !Number.isSafeInteger(Number($('brick-atr-period').value))) { toast('ATR length must be a positive whole number.'); return; }
   if ($('start-date').value && $('end-date').value && $('start-date').value > $('end-date').value) { toast('The start date must be before the end date.'); return; }
   const query = type === 'renko' ? new URLSearchParams({ ...sizingQuery(), include_partials: 'true' }) : new URLSearchParams();
-  query.set('symbol', state.symbol);
+  query.set('symbol', state.symbol); query.set('provider', state.provider);
   const key = `${type}:${query}`;
   state.controller?.abort();
   const sequence = ++state.sequence;
@@ -294,11 +295,11 @@ async function loadData() {
 }
 function updateModeControls(type) {
   const atrSizing = $('sizing-mode').value === 'atr';
-  $('sizing-mode').disabled = type !== 'renko'; $('session-mode').disabled = type !== 'renko';
+  $('sizing-mode').disabled = false; $('session-mode').disabled = false;
   $('percentage-control').hidden = atrSizing; $('percentage-presets').hidden = atrSizing;
   $('atr-control').hidden = !atrSizing; $('atr-presets').hidden = !atrSizing;
-  for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]')]) element.disabled = type !== 'renko' || atrSizing;
-  for (const element of [$('brick-atr-period'), ...document.querySelectorAll('[data-atr]')]) element.disabled = type !== 'renko' || !atrSizing;
+  for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]')]) element.disabled = atrSizing;
+  for (const element of [$('brick-atr-period'), ...document.querySelectorAll('[data-atr]')]) element.disabled = !atrSizing;
   text('indicator-basis', type === 'renko' ? 'Displayed confirmed bricks and any explicit remainders/gap bars. Unfinished moves are excluded in Confirmed moves mode.' : 'Observed daily OHLC, with all available prior dates used for warm-up.');
 }
 function changeTheme() {
@@ -324,15 +325,18 @@ function instrumentLabels(metadata = {}) {
   text('source-note', metadata.source_provider?.startsWith('Yahoo')
     ? `Recent 1-minute prices · ${metadata.downloaded_minutes?.toLocaleString('en-IN') || '—'} minutes. Stocks can gap. Missing minutes stay missing. No local split/dividend adjustment. Downloaded ${dateLabel(metadata.downloaded_at)}.`
     : 'Observed source prices. Opening gaps and missing intervals are preserved.');
+  if (metadata.provider === 'kaggle') text('source-note', `Historical minute archive · ${metadata.downloaded_minutes.toLocaleString('en-IN')} minutes · ${metadata.complete_regular_sessions} complete regular sessions. Earlier years and later missing dates are unavailable. ${metadata.excluded_zero_ohlcv_rows || 0} zero-price placeholders excluded. Corporate-action adjustment basis unverified.`);
   $('source-note').title = metadata.source_limitations || '';
+  if (metadata.first_minute) text('download-hint', `${label} · available ${dateLabel(metadata.first_minute)} — ${dateLabel(metadata.last_minute)}`);
   const range = document.querySelector('[data-range="2015-2020"]');
-  range.hidden = symbol !== 'NIFTY50';
+  range.hidden = !metadata.first_minute || metadata.first_minute.slice(0,10) > '2020-12-31';
 }
 function selectInstrument(symbol, refresh = false) {
-  if (symbol === state.symbol && !refresh) return;
+  const provider = $('download-provider').value;
+  if (symbol === state.symbol && provider === state.provider && !refresh) return;
   state.controller?.abort(); ++state.sequence;
   if (symbol !== state.symbol) state.levels = [];
-  state.symbol = symbol; state.key = ''; state.metadata = null;
+  state.symbol = symbol; state.provider = provider; state.key = ''; state.metadata = null;
   state.raw = []; state.rows = []; state.points = []; state.selected = null; $('pending-note').hidden = true;
   state.markers?.detach(); state.markers = null;
   for (const s of state.overlays) chart.removeSeries(s); state.overlays = [];
@@ -348,16 +352,16 @@ async function downloadAndPlot() {
   if (state.downloading) return;
   let symbol;
   try { symbol = requestedSymbol(); } catch (e) { toast(e.message); return; }
-  if (symbol === 'NIFTY50') { toast('Use Load saved for the original NIFTY history. Choose a stock to download recent minutes.'); return; }
+  if (symbol === 'NIFTY50') { toast('Use Load saved for the original NIFTY history. Choose a stock to download minute prices.'); return; }
   selectInstrument(symbol, true);
-  state.downloading = true; $('symbol-input').disabled = true;
+  state.downloading = true; $('symbol-input').disabled = true; $('download-provider').disabled = true;
   $('download-button').disabled = true; $('instrument-form').querySelector('[type="submit"]').disabled = true;
   $('download-hint').classList.remove('error'); text('download-hint', `Downloading ${symbol} one-minute prices…`);
-  overlay(`Downloading ${symbol}`, 'Fetching recent minute candles. This can take up to two minutes. Existing saved data is retained if the download fails.', { loading: true });
+  overlay(`Downloading ${symbol}`, state.provider === 'kaggle' ? 'Fetching and validating the available historical archive for this stock. This can take several minutes. It does not supply all years since listing.' : 'Fetching recent minute candles (up to 28 days). Existing saved data is retained if the download fails.', { loading: true });
   text('status-text', 'Downloading…'); $('status-dot').classList.remove('ready');
   let success = false;
   try {
-    const response = await fetch(`/download?${new URLSearchParams({symbol, days: $('download-days').value})}`, {method: 'POST'});
+    const response = await fetch(`/download?${new URLSearchParams({symbol, provider: state.provider, days: $('download-days').value})}`, {method: 'POST'});
     const result = await response.json();
     if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Could not download this stock.');
     text('download-hint', `${symbol} · ${result.metadata.downloaded_minutes.toLocaleString('en-IN')} minutes downloaded`);
@@ -366,13 +370,30 @@ async function downloadAndPlot() {
     $('download-hint').classList.add('error'); text('download-hint', 'Download failed. Load saved to open any previous snapshot.');
     overlay('Download unavailable', e.message); text('status-text', 'Download failed');
   } finally {
-    state.downloading = false; $('symbol-input').disabled = false; $('download-button').disabled = false;
+    state.downloading = false; $('symbol-input').disabled = false; $('download-provider').disabled = false; $('download-button').disabled = false;
     $('instrument-form').querySelector('[type="submit"]').disabled = false;
     $('apply-button').disabled = false;
   }
   if (success) await loadData();
 }
+function applySizing(method) {
+  if (method) $('sizing-mode').value = method;
+  $('view-mode').value = 'renko';
+  text('sizing-feedback', 'Recalculating Renko bricks…');
+  loadData();
+}
+function updateProviderControls() {
+  const archive = $('download-provider').value === 'kaggle';
+  $('download-days-control').hidden = archive; $('download-days').disabled = archive;
+  text('download-hint', archive ? 'Available historical minutes · no invented earlier years' : 'Recent minute history only · at most 28 calendar days');
+}
 function events() {
+  $('download-provider').addEventListener('change', () => {
+    updateProviderControls();
+    try { selectInstrument(requestedSymbol()); loadData(); } catch (e) { toast(e.message); }
+  });
+  $('percentage').addEventListener('change', () => applySizing('percentage'));
+  $('brick-atr-period').addEventListener('change', () => applySizing('atr'));
   $('instrument-form').addEventListener('submit', event => {
     event.preventDefault(); if (state.downloading) return;
     try { selectInstrument(requestedSymbol()); loadData(); } catch (e) { toast(e.message); }
@@ -382,10 +403,10 @@ function events() {
   $('retry-button').addEventListener('click', loadData);
   $('view-mode').addEventListener('change', loadData);
   $('show-ath').addEventListener('change', () => { state.markers?.setMarkers($('show-ath').checked ? breakoutMarkers(state.rows, state.points) : []); shareURL(); });
-  $('sizing-mode').addEventListener('change', loadData);
-  $('session-mode').addEventListener('change', loadData);
-  for (const b of document.querySelectorAll('[data-percent]')) b.addEventListener('click', () => { $('percentage').value = b.dataset.percent; loadData(); });
-  for (const b of document.querySelectorAll('[data-atr]')) b.addEventListener('click', () => { $('brick-atr-period').value = b.dataset.atr; loadData(); });
+  $('sizing-mode').addEventListener('change', () => applySizing());
+  $('session-mode').addEventListener('change', () => applySizing());
+  for (const b of document.querySelectorAll('[data-percent]')) b.addEventListener('click', () => { $('percentage').value = b.dataset.percent; applySizing('percentage'); });
+  for (const b of document.querySelectorAll('[data-atr]')) b.addEventListener('click', () => { $('brick-atr-period').value = b.dataset.atr; applySizing('atr'); });
   for (const button of document.querySelectorAll('[data-range]')) button.addEventListener('click', async () => {
     if (!state.metadata) return;
     for (const b of document.querySelectorAll('[data-range]')) b.classList.toggle('active', b === button);
@@ -456,7 +477,10 @@ function events() {
 try {
   if (!L) throw new Error('Chart library did not load. Pull the complete repository, including static/vendor, and restart the server.');
   try { document.documentElement.dataset.theme = localStorage.getItem('realrenko-theme') === 'light' ? 'light' : 'dark'; } catch {}
-  const q = new URLSearchParams(location.search);
+  const q = new URLSearchParams({...JSON.parse(document.documentElement.dataset.chartDefaults || '{}'), ...Object.fromEntries(new URLSearchParams(location.search))});
+  state.provider = q.get('provider') || document.documentElement.dataset.defaultProvider || 'kaggle';
+  if (!['kaggle','yahoo'].includes(state.provider)) throw new Error('Unknown data provider');
+  $('download-provider').value = state.provider; updateProviderControls();
   $('symbol-input').value = q.get('symbol') || document.documentElement.dataset.defaultSymbol || 'NIFTY50';
   state.symbol = requestedSymbol(); instrumentLabels();
   const p = Number((q.get('percentage') || '1').replace('%', ''));
