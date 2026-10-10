@@ -1,0 +1,11 @@
+{
+  "name": "realrenko-chart-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "happy-dom": "20.14.6"
+  }
+}

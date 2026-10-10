@@ -1,5 +1,98 @@
 # RealRenko — exact percentage blocks with full-size gaps
 
+
+## Interactive chart workspace
+
+Open **http://127.0.0.1:8000/chart** after starting the existing API. The new UI
+uses the locally bundled TradingView Lightweight Charts 5.2.1 library. There is
+no CDN request, paid charting subscription, or frontend build step.
+
+- **Drag left/right or up/down** to move the chart. Dragging turns off price
+  autoscaling so vertical movement is possible. **Auto** restores price fitting.
+- Scroll/pinch to zoom, drag either axis to scale, or use +/− controls and keys.
+- Use **Latest blocks** for a readable recent window, **Fit** for all loaded
+  bars, and **Log** for a logarithmic price scale. Home fits; End shows the latest.
+- Hover for OHLC and timestamps, click a block to pin it, or use the inspector.
+- Add horizontal price levels with the — tool; clear them with the erase button.
+- Percentage presets, date inputs, gap/partial toggles, light/dark mode,
+  fullscreen and PNG export are included. Fullscreen availability depends on
+  the browser. PNG export captures the chart canvas.
+
+### See NIFTY's actual long-term movement
+
+The **View** selector offers **Renko blocks**, **NIFTY daily trend**, and
+**NIFTY daily candles**. The **2015–20** shortcut opens the daily price trend
+for that period. This avoids compressing thousands of tiny blocks into an
+unreadable full-history candle plot.
+
+The daily views use real daily OHLC aggregated from the provided minute data
+through `/history`, not percentage-block geometry. Prices are not rebased to
+100 or normalized. In the source window from 9 January 2015 to 31 December
+2020, first observed open is 8,285.45 and last observed close is 13,967.00.
+See `examples/daily_price_validation.json` for the full-source check. These are
+observed source prices, not official NSE daily settlement/closing calculations.
+
+The **Loaded window** change is first displayed open to last displayed close;
+it is neither a trading return nor the change of only the zoomed viewport.
+Daily candles with incomplete/nonstandard minute coverage are identified in
+the inspector. The supplied history ends in March 2024, so this is historical
+charting rather than a live market feed.
+
+### Indicators
+
+Open **ƒx Indicators** to enable:
+
+- **Supertrend**: adjustable ATR length (default 10) and factor (default 3),
+  using Wilder ATR and trailing upper/lower bands.
+- **EMA**: adjustable length (default 20), with a first-close recursive seed.
+- **SMA**: adjustable length (default 50), with the normal full-window warm-up.
+
+Daily views calculate on actual daily OHLC. Renko calculates on completed
+percentage blocks and gap bars; partials are excluded. Merely hiding gap bars
+changes visibility, not the indicator input. The controls explicitly identify
+which data the indicators use. Values can differ from another platform using
+a different data feed, candle type, history length or initialization.
+
+All available earlier history is loaded for indicator warm-up before applying
+the date window; panning/zooming never restarts an indicator. Insufficient ATR
+or SMA warm-up stays blank rather than displaying invented values. Supertrend
+is shown as a stepped line, colored green for bullish and red for bearish.
+
+These are built-in JavaScript implementations of public indicator formulas.
+There is no Pine Script interpreter or automatic TradingView community-script
+import. Formula references: [Supertrend](https://www.tradingview.com/support/solutions/43000634738-supertrend/)
+and [ATR / RMA](https://www.tradingview.com/support/solutions/43000734653-how-are-adr-and-atr-calculated/).
+
+### UI implementation and checks
+
+`static/chart.html`, `chart.css`, and `chart.mjs` provide the interface.
+`chart-data.mjs` preserves original OHLC and assigns unique, equally spaced
+internal coordinates to each displayed bar. Multiple bricks confirmed in one
+minute remain separate; labels and crosshair dates map back to real IST times.
+Internal coordinates are never presented as market timestamps.
+
+`static/indicators.mjs` holds the testable indicator calculations.
+The bundled chart library, Apache-2.0 license, and TradingView copyright notice
+are in `static/vendor/`. Required attribution remains visible in the UI.
+
+Python checks (18 tests): `python -m unittest -v` after installing
+`requirements-dev.txt`. Optional frontend developer checks (Node 20+):
+
+```bash
+npm ci
+npm test
+```
+
+Seven frontend tests cover hand-calculated indicators, no-lookahead behavior,
+actual chart OHLC, duplicate-time bricks, historical price levels, and DOM
+control interactions. The DOM smoke test uses a stubbed chart engine. A real
+browser/canvas visual and gesture check was not available in the build
+environment; the test is not a substitute for that check.
+
+`/chart` serves the new interface. `make_chart()` and CLI `--html` continue to
+produce the older, standalone Plotly export for compatibility.
+
+
 Convert NIFTY 50 minute history into fixed-percentage Renko-style blocks, return
 OHLC through FastAPI, and plot overnight gaps as one full-size bar.
 

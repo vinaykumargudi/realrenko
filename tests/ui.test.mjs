@@ -1,0 +1,101 @@
+// DOM interaction smoke test. The rendering engine is stubbed: this does not
+// replace a real browser screenshot or test canvas pixels / physical gestures.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { Window } from 'happy-dom';
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+const bar = (id, kind, open, close, end, extra={}) => ({bar_id:id,kind,open,close,
+  high:Math.max(open,close),low:Math.min(open,close),start:end,end,known_at:end,
+  move_pct:(close/open-1)*100,source_minutes:1,synthetic_bridge:kind==='session_gap',...extra});
+const renko=[bar(0,'move',100,101,'2019-01-01T15:30:00+05:30'),
+  bar(1,'session_gap',101,104.03,'2019-01-02T09:15:00+05:30'),
+  bar(2,'move',104.03,105.0703,'2020-12-31T15:30:00+05:30'),
+  bar(3,'partial',105.0703,105.2,'2020-12-31T15:30:00+05:30')];
+const daily=[bar(0,'price',8000,8200,'2015-01-09T15:30:00+05:30'),
+  bar(1,'price',8100,7900,'2015-01-12T15:30:00+05:30'),
+  bar(2,'price',13900,14000,'2020-12-31T15:30:00+05:30')];
+const payload = (rows, mode) => ({metadata:{mode,percentage:1,first_minute:'2015-01-09T09:15:00+05:30',last_minute:'2020-12-31T15:29:00+05:30'},bars:rows});
+
+function engine() {
+  const chart={series:[],options:{},priceOptions:{},range:null,crosshair:null,click:null};
+  const scale={applyOptions:o=>Object.assign(chart.priceOptions,o)};
+  const time={getVisibleLogicalRange:()=>chart.range,
+    setVisibleLogicalRange:r=>{chart.range=r;chart.rangeCallback?.(r);},
+    fitContent:()=>time.setVisibleLogicalRange({from:0,to:Math.max(0,(chart.series[0]?.data.length||1)-1)}),
+    subscribeVisibleLogicalRangeChange:f=>{chart.rangeCallback=f;}};
+  Object.assign(chart,{priceScale:()=>scale,timeScale:()=>time,
+    applyOptions:o=>Object.assign(chart.options,o),
+    addSeries:(type,options)=>{
+      const series={type,options,data:[],lines:[],setData(d){this.data=d;},
+        coordinateToPrice:y=>100+y/10,createPriceLine(line){this.lines.push(line);return line;},
+        removePriceLine(line){this.lines=this.lines.filter(x=>x!==line);}};
+      chart.series.push(series);return series;
+    },removeSeries:s=>{chart.series=chart.series.filter(x=>x!==s);},
+    subscribeCrosshairMove:f=>{chart.crosshair=f;},subscribeClick:f=>{chart.click=f;}});
+  return {chart,library:{createChart:(element,options)=>{chart.options=options;return chart;},
+    ColorType:{Solid:'solid'},LineStyle:{Dashed:2},CrosshairMode:{Magnet:1,Normal:0},
+    PriceScaleMode:{Logarithmic:1,Normal:0},LineType:{WithSteps:1,Simple:0},
+    CandlestickSeries:'candle',AreaSeries:'area',LineSeries:'line'}};
+}
+
+test('Chart controls, data views, indicators, pinning and pan configuration are wired', async () => {
+  const w=new Window({url:'http://localhost/chart?percentage=1',settings:{disableJavaScriptEvaluation:true,
+    disableCSSFileLoading:true,disableJavaScriptFileLoading:true}});
+  w.document.write(await readFile(new URL('../static/chart.html',import.meta.url),'utf8'));
+  for(const k of ['window','document','history','location','localStorage']) globalThis[k]= k==='window'?w:w[k];
+  globalThis.getComputedStyle=w.getComputedStyle.bind(w);
+  globalThis.matchMedia=()=>({matches:false});
+  for(const [k,v] of Object.entries({chart:'#101319',text:'#e6eaf2',muted:'#8993a7',border:'#282e3b',green:'#26c59c',red:'#ee6072',blue:'#629aff',purple:'#b490ff',amber:'#edac55',accent:'#628bff'})) w.document.documentElement.style.setProperty(`--${k}`,v);
+  const {chart,library}=engine();w.LightweightCharts=library;
+  const requests=[];
+  globalThis.fetch=async url=>{requests.push(String(url));return {ok:true,json:async()=>String(url).startsWith('/history')?payload(daily,'observed_daily_price'):payload(renko,'exact_percentage_close')};};
+  const $=id=>w.document.getElementById(id);
+  const change=id=>$(id).dispatchEvent(new w.Event('change',{bubbles:true}));
+  const submit=id=>$(id).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  try {
+    await import(`../static/chart.mjs?smoke=${Date.now()}`);await settle();
+    assert.equal($('chart-overlay').hidden,true);
+    assert.equal(chart.series[0].type,'candle');assert.equal(chart.series[0].data.length,3);
+    assert.equal(chart.options.handleScroll.pressedMouseMove,true);
+    assert.equal(chart.options.handleScroll.vertTouchDrag,true);
+    assert.equal(chart.options.handleScale.axisPressedMouseMove.price,true);
+    const first=chart.series[0].data[0];
+    assert.ok(chart.options.localization.timeFormatter(first.time).includes('2019'));
+    assert.ok(!chart.options.localization.timeFormatter(first.time).includes('1970'));
+    $('chart').dispatchEvent(new w.PointerEvent('pointerdown',{button:0,bubbles:true}));
+    assert.equal(chart.priceOptions.autoScale,false);
+    $('auto-scale-button').click();assert.equal(chart.priceOptions.autoScale,true);
+    const width=chart.range.to-chart.range.from;$('zoom-in').click();
+    assert.ok(chart.range.to-chart.range.from<width);
+    chart.click({time:first.time});
+    assert.equal($('selection-state').textContent,'Pinned');
+    chart.crosshair({time:chart.series[0].data.at(-1).time});assert.equal($('block-id').textContent,'#1');
+    $('unpin-button').click();assert.equal($('unpin-button').hidden,true);
+    $('show-gaps').checked=false;change('show-gaps');assert.equal(chart.series[0].data.length,2);
+    for(const p of chart.series[0].data) assert.ok(Math.abs((p.close/p.open-1)*100-1)<1e-10);
+    $('show-partials').checked=true;change('show-partials');assert.equal(chart.series[0].data.length,3);
+    $('supertrend-enabled').checked=true;$('atr-period').value='1';$('atr-factor').value='1';
+    $('ema-enabled').checked=true;
+    submit('indicator-form');
+    assert.equal(chart.series.filter(s=>s.type==='line').length,2);
+    assert.equal($('indicator-count').textContent,'2');
+    w.document.querySelector('[data-range="2015-2020"]').click();await settle();
+    assert.ok(requests.some(x=>x.startsWith('/history')));
+    assert.equal($('view-mode').value,'daily-line');assert.equal(chart.series[0].type,'area');
+    assert.equal(chart.series[0].data[0].value,8200);assert.equal(chart.series[0].data.at(-1).value,14000);
+    assert.equal($('percentage').disabled,true);
+    assert.ok($('window-return').textContent.includes('+75.00%'));
+    const requestCount=requests.length;
+    $('view-mode').value='daily-candles';change('view-mode');await settle();
+    assert.equal(chart.series[0].type,'candle');assert.equal(requests.length,requestCount);
+    $('log-button').click();assert.equal(chart.priceOptions.mode,1);
+    $('theme-button').click();assert.equal(w.document.documentElement.dataset.theme,'light');
+    $('level-button').click();chart.click({point:{y:100}});
+    assert.equal(chart.series[0].lines.length,1);
+    $('clear-levels-button').click();assert.equal(chart.series[0].lines.length,0);
+    $('start-date').value='2010-01-01';$('end-date').value='2010-12-31';submit('controls');await settle();
+    assert.equal($('chart-overlay').hidden,false);assert.equal($('overlay-title').textContent,'No prices in this window');
+  } finally { await w.happyDOM.close(); }
+});

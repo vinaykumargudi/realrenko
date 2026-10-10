@@ -1,0 +1,15 @@
+{
+  "dataset_mode": "observed_daily_price",
+  "observed_daily_bars": 2282,
+  "requested_window": "2015-01-01 through 2020-12-31",
+  "daily_bars_in_window": 1479,
+  "first_date": "2015-01-09T09:15:00+05:30",
+  "first_open": 8285.45,
+  "first_close": 8280.25,
+  "last_date": "2020-12-31T15:30:00+05:30",
+  "last_close": 13967.0,
+  "first_open_to_last_close_pct": 68.57261826454808,
+  "minimum_daily_close": 6970.55,
+  "maximum_daily_close": 13975.25,
+  "note": "Actual observed daily prices, not synthetic Renko OHLC or strategy returns."
+}

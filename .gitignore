@@ -6,3 +6,4 @@ nifty50_candlestick_data.csv
 bars.json
 bars.html
 *.egg-info/
+node_modules

@@ -192,7 +192,11 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(sum(b['source_minutes'] for b in full_result['bars']), 2)
             html = client.get('/chart?percentage=1')
             self.assertEqual(html.status_code, 200, html.text[:200])
-            self.assertIn('plotly', html.text.lower())
+            self.assertIn('/assets/chart.mjs', html.text)
+            self.assertIn('NIFTY daily trend', html.text)
+            self.assertEqual(client.get('/assets/chart.css').status_code, 200)
+            self.assertEqual(client.get('/assets/vendor/lightweight-charts-5.2.1.js').status_code, 200)
+            self.assertEqual(client.get('/').status_code, 200)
             fig = make_chart(result)
             normal = next(t for t in fig.data if t.name == 'move')
             for o, h, l, close in zip(normal.open, normal.high, normal.low, normal.close):

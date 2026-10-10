@@ -347,9 +347,12 @@ def make_chart(result: dict):
 def create_app(csv_path: str | Path = DEFAULT_CSV):
     """Local read-only FastAPI service. File must be downloaded before startup."""
     from fastapi import FastAPI, HTTPException, Query
-    from fastapi.responses import HTMLResponse
-    app = FastAPI(title="NIFTY percentage OHLC blocks", version="2.0.0")
+    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+    app = FastAPI(title="NIFTY percentage OHLC blocks", version="2.1.0")
     source = Path(csv_path).resolve()
+    static = Path(__file__).with_name("static")
+    app.mount("/assets", StaticFiles(directory=static), name="assets")
 
     @lru_cache(maxsize=4)
     def calculate(p: str, mtime_ns: int, size: int):
@@ -374,11 +377,30 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
              start: date | None = None, end: date | None = None, include_partials: bool = False):
         return get_result(percentage, start, end, include_partials)
 
+    @lru_cache(maxsize=1)
+    def calculate_history(mtime_ns: int, size: int):
+        from daily_history import daily_history
+        return daily_history(source)
+
+    @app.get("/history")
+    def history(start: date | None = None, end: date | None = None):
+        try:
+            stat = source.stat()
+            return filter_result(calculate_history(stat.st_mtime_ns, stat.st_size), start, end)
+        except FileNotFoundError:
+            raise HTTPException(503, "CSV missing. Run python nifty_bars.py --download first.")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        return RedirectResponse("/chart")
+
     @app.get("/chart", response_class=HTMLResponse)
-    def chart(percentage: str = Query("1"), start: date | None = None, end: date | None = None,
-              include_partials: bool = False):
-        result = get_result(percentage, start, end, include_partials)
-        return HTMLResponse(make_chart(result).to_html(full_html=True, include_plotlyjs=True))
+    def chart():
+        # The lightweight shell loads first; its controls fetch /bars or /history.
+        return HTMLResponse(static.joinpath("chart.html").read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-cache"})
 
     return app
 
