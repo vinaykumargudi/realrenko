@@ -1,11 +1,11 @@
-"""Close-confirmed percentage OHLC bars with explicit, unsplit gap bridges.
+"""Exact-percentage close-based bricks with explicit, unsplit gap bridges.
 
 Python 3.10+. The converter/CLI use only the standard library. API/plotting
 dependencies are in requirements.txt. Run `python nifty_bars.py --help`.
 
-This is whole-minute aggregation, NOT exact-size Renko or tick reconstruction.
-Every input minute belongs to exactly one non-synthetic output bar. Prices are
-Decimal throughout calculation; conversion to floats occurs only for output.
+Normal OHLC is synthetic Renko-style geometry based on completed minute closes.
+Source OHLC stays separate; excess displacement carries into subsequent bricks.
+Calculations use Decimal; JSON prices are floats. No tick path is reconstructed.
 """
 from __future__ import annotations
 
@@ -144,54 +144,63 @@ def validate_candle(c: Candle, previous: Candle | None) -> None:
         raise ValueError(f"Invalid OHLC at {c.timestamp.isoformat()}")
 
 
-def convert_minutes(candles: Iterable[Candle], percentage=1) -> dict:
-    """Aggregate disjoint whole minutes; reset at session/data boundaries.
+def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials=False) -> dict:
+    """Build exact-percentage close-based bricks, carrying excess forward.
 
-    A normal block closes when abs(close-open)*100 >= open*percentage.
-    Its open is the first constituent minute's open. H/L are true extrema of
-    ALL constituent minutes, C is the last minute's actual close. No rounding,
-    clipping, high/low ordering assumptions, or splitting of source minutes.
+    Normal OHLC is synthetic: O=anchor, C=anchor*(1 +/- p/100), H=max(O,C),
+    L=min(O,C). Consume all thresholds crossed by a minute CLOSE, then retain
+    the final anchor for the next minute. Never round a 1.4% source move into
+    a 1.4% normal brick. Actual source OHLC is separate audit metadata.
 
-    At a session boundary, finalize a pending block as `partial`, then emit
-    one synthetic bridge from the previous observed minute close to the next
-    open (even if smaller than the threshold). The next block starts afresh.
-    Missing minute intervals also finalize the pending block and receive a
-    `data_gap` marker; their unknown path is never treated as observed OHLC.
+    Session/missing-data gaps stay one unsplit endpoint bridge; reset the
+    anchor to the next observed open. Session/end-of-input residuals are
+    partials, hidden by default. No intraminute price path is reconstructed.
     """
     p = parse_percent(percentage)
-    bars: list[dict] = []
-    active = None
-    previous = None
-    first = None
-    row_count = 0
-    sessions: dict[date, list] = {}
-    missing_intervals = 0
-    normalized_labels = 0
-    raw_rows = 0
+    fraction = p / HUNDRED
+    up_factor, down_factor = Decimal(1) + fraction, Decimal(1) - fraction
+    if up_factor == 1 or down_factor == 1:
+        raise ValueError("percentage is too small for Decimal precision")
+    bars = []
+    anchor = span_start = observed = previous = first = None
+    pending_count = row_count = missing_intervals = normalized_labels = raw_rows = 0
+    sessions = {}
     merged_buckets = []
 
-    def emit(kind, start, end, known_at, o, h, l, c, count, reason, synthetic=False):
-        move = (c - o) / o * HUNDRED
+    def ohlc_dict(c):
+        return {k: float(getattr(c, k)) for k in ("open", "high", "low", "close")}
+
+    def emit(kind, start, end, known_at, o, close, count, reason, observation=None, trigger=None):
+        if len(bars) >= 1_000_000:
+            raise ValueError("Output exceeds 1,000,000 bars; choose a larger percentage")
+        # For normal bricks this is defined by the exact percentage construction.
+        # JSON float price ratios can differ by ordinary floating-point epsilon.
+        move = (p if close > o else -p) if kind == "move" else (close - o) / o * HUNDRED
         bars.append({
             "bar_id": len(bars), "kind": kind,
-            "start": start.isoformat(), "end": end.isoformat(),
-            "known_at": known_at.isoformat(),
-            "open": float(o), "high": float(h), "low": float(l), "close": float(c),
-            "move_pct": float(move), "range_pct": float((h - l) / o * HUNDRED),
-            "direction": "up" if c > o else "down" if c < o else "flat",
-            "source_minutes": count, "synthetic_bridge": synthetic,
-            "threshold_reached": abs(c - o) * HUNDRED >= o * p,
+            "start": start.isoformat(), "end": end.isoformat(), "known_at": known_at.isoformat(),
+            "open": float(o), "high": float(max(o, close)),
+            "low": float(min(o, close)), "close": float(close),
+            "move_pct": float(move), "range_pct": float(abs(move)),
+            "direction": "up" if close > o else "down" if close < o else "flat",
+            "source_minutes": count,
+            "synthetic_ohlc": True, "synthetic_bridge": kind in ("session_gap", "data_gap"),
+            "threshold_reached": kind == "move" or abs(move) >= p,
             "finalized": kind != "partial" or reason != "end_of_input",
             "reason": reason,
+            "observed_ohlc": {k: float(v) for k, v in observation.items()} if observation else None,
+            "trigger_minute": ({"timestamp": trigger.timestamp.isoformat(), **ohlc_dict(trigger)}
+                               if trigger is not None else None),
         })
 
     def flush(reason, known_at=None):
-        nonlocal active
-        if active is not None:
-            emit("partial", active["start"], active["end"], known_at or active["end"],
-                 active["open"], active["high"], active["low"], active["close"],
-                 active["count"], reason)
-            active = None
+        nonlocal anchor, span_start, pending_count, observed
+        if anchor is not None and (pending_count or previous.close != anchor):
+            emit("partial", span_start, previous.timestamp + MINUTE,
+                 known_at or previous.timestamp + MINUTE, anchor, previous.close,
+                 pending_count, reason, observed, previous)
+        anchor = span_start = observed = None
+        pending_count = 0
 
     for c in candles:
         validate_candle(c, previous)
@@ -208,9 +217,7 @@ def convert_minutes(candles: Iterable[Candle], percentage=1) -> dict:
             missing = not day_changed and c.timestamp - previous.timestamp != MINUTE
             if day_changed or missing:
                 flush("session_end" if day_changed else "missing_minutes", c.timestamp)
-                if missing:
-                    missing_intervals += 1
-                # NSE normal-session conventions only, not an exchange calendar.
+                missing_intervals += int(missing)
                 normal_endpoints = (previous.timestamp.time() == time(15, 29)
                                     and c.timestamp.time() == time(9, 15))
                 kind = "session_gap" if day_changed and normal_endpoints else "data_gap"
@@ -218,55 +225,68 @@ def convert_minutes(candles: Iterable[Candle], percentage=1) -> dict:
                           else "missing_minutes" if missing else "nonstandard_session_endpoints")
                 if kind == "data_gap" or c.open != previous.close:
                     emit(kind, previous.timestamp + MINUTE, c.timestamp, c.timestamp,
-                         previous.close, max(previous.close, c.open),
-                         min(previous.close, c.open), c.open, 0, reason, True)
-        if active is None:
-            active = {"start": c.timestamp, "open": c.open, "high": c.high,
-                      "low": c.low, "count": 0}
-        active["high"] = max(active["high"], c.high)
-        active["low"] = min(active["low"], c.low)
-        active["close"] = c.close
-        active["end"] = c.timestamp + MINUTE
-        active["count"] += 1
-        if abs(c.close - active["open"]) * HUNDRED >= active["open"] * p:
-            emit("move", active["start"], active["end"], active["end"],
-                 active["open"], active["high"], active["low"], c.close,
-                 active["count"], "minute_close_threshold")
-            active = None
+                         previous.close, c.open, 0, reason)
+        if anchor is None:
+            anchor, span_start = c.open, c.timestamp
+        pending_count += 1
+        if observed is None:
+            observed = {"open": c.open, "high": c.high, "low": c.low, "close": c.close}
+        else:
+            observed["high"] = max(observed["high"], c.high)
+            observed["low"] = min(observed["low"], c.low)
+            observed["close"] = c.close
+        while True:
+            upper, lower = anchor * up_factor, anchor * down_factor
+            if upper == anchor or lower == anchor:
+                raise ValueError("percentage is too small for Decimal precision at this price")
+            if c.close >= upper:
+                target = upper
+            elif c.close <= lower:
+                target = lower
+            else:
+                break
+            emit("move", span_start, c.timestamp + MINUTE, c.timestamp + MINUTE,
+                 anchor, target, pending_count, "exact_percentage_close_projection", observed, c)
+            anchor = target  # KEEP the unused displacement; never reset to c.close/c.open.
+            span_start = c.timestamp + MINUTE
+            pending_count, observed = 0, None
         previous = c
-    flush("end_of_input")
     if first is None:
         raise ValueError("No minute candles supplied")
+    flush("end_of_input")
     irregular = [{"date": str(day), "first": a.isoformat(), "last": b.isoformat(), "minutes": n}
                  for day, (a, b, n) in sessions.items()
                  if a.time() != time(9, 15) or b.time() != time(15, 29) or n != 375]
+    visible = bars if include_partials else [b for b in bars if b["kind"] != "partial"]
     return {"metadata": {
-        "percentage": float(p), "mode": "whole_minute_close_confirmed",
+        "algorithm_version": "2.0.0", "percentage": float(p), "mode": "exact_percentage_close",
+        "include_partials": include_partials,
         "timezone": "Asia/Kolkata", "timestamp_convention": "minute_start",
-        "first_minute": first.timestamp.isoformat(),
-        "last_minute": previous.timestamp.isoformat(),
-        "source_minutes": row_count, "observed_sessions": len(sessions),
-        "source_rows": raw_rows,
+        "first_minute": first.timestamp.isoformat(), "last_minute": previous.timestamp.isoformat(),
+        "source_minutes": row_count, "observed_sessions": len(sessions), "source_rows": raw_rows,
         "bar_counts": dict(Counter(b["kind"] for b in bars)),
+        "returned_bar_counts": dict(Counter(b["kind"] for b in visible)),
         "missing_intraday_intervals": missing_intervals,
         "timestamp_labels_floored_to_minute": normalized_labels,
         "merged_minute_buckets": merged_buckets,
         "sessions_outside_normal_375_minute_template": irregular,
         "notes": [
-            "1 means 1%, not 0.01. Threshold is absolute open-to-close displacement, not high-low range.",
-            "Blocks can overshoot; intraminute ordering is unknown. No synthetic exact-size bricks.",
-            "Every session starts a new block; unfinished session blocks remain as partial bars.",
-            "Bridges are visualization endpoints only: their high/low do not imply traded prices or known paths.",
-            "Session gaps use last observed minute close, not the official calculated daily closing index.",
-            "No exchange calendar is applied: entirely missing sessions cannot be distinguished from holidays.",
-            "375-minute template flags can include legitimate special sessions or trading halts.",
-            "Only completed minute candles may be passed in. The last partial block can grow on new input.",
-            "CSV labels are assumed minute-start IST and floored; duplicate minute buckets use first/max/min/last unless error policy is selected.",
+            "1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision.",
+            "Normal OHLC is a synthetic close-based projection without wicks; observed OHLC is separate and never assigned as a brick's high/low.",
+            "Each crossed percentage threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
+            "Only minute closes confirm bricks. Multiple bricks from one close share known_at; intraminute crossing times are unknown.",
+            "source_minutes counts newly consumed observations; extra bricks from the same minute count zero. Sum counts only with partials included.",
+            "Every session starts a fresh anchor. Partial residuals are hidden by default; request include_partials=true to see them.",
+            "Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
+            "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
+            "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
+            "CSV minute-start IST labels are floored; minute collisions use first/max/min/last unless error policy is selected.",
         ],
-    }, "bars": bars}
+    }, "bars": visible}
 
 
-def filter_result(result: dict, start: date | None = None, end: date | None = None) -> dict:
+def filter_result(result: dict, start: date | None = None, end: date | None = None,
+                  *, include_partials=False) -> dict:
     """Filter AFTER conversion so a chart window cannot alter historical blocks.
 
     Use the event's IST date (end date). Thus a session-gap belongs to its opening
@@ -275,18 +295,22 @@ def filter_result(result: dict, start: date | None = None, end: date | None = No
     if start and end and start > end:
         raise ValueError("start must be on or before end")
     bars = [b for b in result["bars"]
-            if (start is None or date.fromisoformat(b["end"][:10]) >= start)
+            if (include_partials or b["kind"] != "partial")
+            and (start is None or date.fromisoformat(b["end"][:10]) >= start)
             and (end is None or date.fromisoformat(b["end"][:10]) <= end)]
     return {"metadata": {**result["metadata"],
                          "display_start": str(start) if start else None,
                          "display_end": str(end) if end else None,
-                         "display_bar_count": len(bars)}, "bars": bars}
+                         "display_bar_count": len(bars),
+                         "include_partials": include_partials,
+                         "returned_bar_counts": dict(Counter(b["kind"] for b in bars))}, "bars": bars}
 
 
 def make_chart(result: dict):
     """Each output bar gets one x position; gap bodies retain actual price size."""
     import plotly.graph_objects as go
     fig = go.Figure()
+    positions = {b["bar_id"]: i for i, b in enumerate(result["bars"])}
     colors = {"move": ("#15803d", "#dc2626"), "session_gap": ("#2563eb", "#9333ea"),
               "partial": ("#94a3b8", "#64748b"), "data_gap": ("#d97706", "#d97706")}
     for kind, (up, down) in colors.items():
@@ -298,7 +322,7 @@ def make_chart(result: dict):
                  f"<br>{b['source_minutes']} source minutes; {b['reason']}"
                  for b in rows]
         fig.add_trace(go.Candlestick(
-            name=kind, x=[b["bar_id"] for b in rows],
+            name=kind, x=[positions[b["bar_id"]] for b in rows],
             open=[b["open"] for b in rows], high=[b["high"] for b in rows],
             low=[b["low"] for b in rows], close=[b["close"] for b in rows],
             increasing_line_color=up, increasing_fillcolor=up,
@@ -307,12 +331,12 @@ def make_chart(result: dict):
     rows = result["bars"]
     ticks = rows[::max(1, len(rows) // 8)]
     fig.update_layout(
-        title=f"NIFTY 50 • {result['metadata']['percentage']:g}% close-confirmed blocks",
+        title=f"NIFTY 50 • {result['metadata']['percentage']:g}% exact close-based bricks",
         template="plotly_white", height=680,
-        yaxis_title="Index level (actual prices)",
+        yaxis_title="Index level (calculated brick boundaries)",
         xaxis_title="Sequential blocks • equal spacing, variable elapsed time",
         xaxis_rangeslider_visible=False,
-        xaxis=dict(tickmode="array", tickvals=[b["bar_id"] for b in ticks],
+        xaxis=dict(tickmode="array", tickvals=[positions[b["bar_id"]] for b in ticks],
                    ticktext=[b["end"][:16].replace("T", " ") for b in ticks]),
         legend=dict(orientation="h", y=1.08), margin=dict(b=130),
         annotations=[dict(x=0, y=-0.20, xref="paper", yref="paper", showarrow=False,
@@ -324,22 +348,22 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
     """Local read-only FastAPI service. File must be downloaded before startup."""
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.responses import HTMLResponse
-    app = FastAPI(title="NIFTY percentage OHLC blocks", version="1.0.0")
+    app = FastAPI(title="NIFTY percentage OHLC blocks", version="2.0.0")
     source = Path(csv_path).resolve()
 
     @lru_cache(maxsize=4)
     def calculate(p: str, mtime_ns: int, size: int):
         # Cache key includes file state; errors are not cached.
-        return convert_minutes(read_minutes(source), p)
+        return convert_minutes(read_minutes(source), p, include_partials=True)
 
-    def get_result(percentage, start, end):
+    def get_result(percentage, start, end, include_partials):
         try:
             p = parse_percent(percentage)
             if start and end and start > end:
                 raise ValueError("start must be on or before end")
             stat = source.stat()
             data = calculate(str(p.normalize()), stat.st_mtime_ns, stat.st_size)
-            return filter_result(data, start, end)
+            return filter_result(data, start, end, include_partials=include_partials)
         except FileNotFoundError:
             raise HTTPException(503, "CSV missing. Run python nifty_bars.py --download first.")
         except (ValueError, InvalidOperation) as exc:
@@ -347,12 +371,13 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
 
     @app.get("/bars")
     def bars(percentage: str = Query("1", description="1 or 1% means one percent"),
-             start: date | None = None, end: date | None = None):
-        return get_result(percentage, start, end)
+             start: date | None = None, end: date | None = None, include_partials: bool = False):
+        return get_result(percentage, start, end, include_partials)
 
     @app.get("/chart", response_class=HTMLResponse)
-    def chart(percentage: str = Query("1"), start: date | None = None, end: date | None = None):
-        result = get_result(percentage, start, end)
+    def chart(percentage: str = Query("1"), start: date | None = None, end: date | None = None,
+              include_partials: bool = False):
+        result = get_result(percentage, start, end, include_partials)
         return HTMLResponse(make_chart(result).to_html(full_html=True, include_plotlyjs=True))
 
     return app
@@ -367,6 +392,7 @@ def main():
     parser.add_argument("--html", type=Path, help="Also save an interactive candlestick chart")
     parser.add_argument("--start", type=date.fromisoformat)
     parser.add_argument("--end", type=date.fromisoformat)
+    parser.add_argument("--include-partials", action="store_true", help="Show unfinished residual blocks")
     parser.add_argument("--serve", action="store_true", help="Serve /bars, /chart and /docs locally")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
@@ -376,7 +402,8 @@ def main():
         import uvicorn
         uvicorn.run(create_app(args.csv), host="127.0.0.1", port=args.port)
         return
-    result = filter_result(convert_minutes(read_minutes(args.csv), args.percentage), args.start, args.end)
+    result = filter_result(convert_minutes(read_minutes(args.csv), args.percentage, include_partials=True),
+                           args.start, args.end, include_partials=args.include_partials)
     with args.csv.open("rb") as src:
         digest = hashlib.sha256()
         for chunk in iter(lambda: src.read(1024 * 1024), b""):

@@ -1,6 +1,8 @@
 {
+  "algorithm_version": "2.0.0",
   "percentage": 1.0,
-  "mode": "whole_minute_close_confirmed",
+  "mode": "exact_percentage_close",
+  "include_partials": true,
   "timezone": "Asia/Kolkata",
   "timestamp_convention": "minute_start",
   "first_minute": "2015-01-09T09:15:00+05:30",
@@ -9,9 +11,15 @@
   "observed_sessions": 2282,
   "source_rows": 852087,
   "bar_counts": {
-    "partial": 2315,
+    "partial": 2317,
     "session_gap": 2257,
-    "move": 1026,
+    "move": 1033,
+    "data_gap": 57
+  },
+  "returned_bar_counts": {
+    "partial": 2317,
+    "session_gap": 2257,
+    "move": 1033,
     "data_gap": 57
   },
   "missing_intraday_intervals": 35,
@@ -271,30 +279,33 @@
     }
   ],
   "notes": [
-    "1 means 1%, not 0.01. Threshold is absolute open-to-close displacement, not high-low range.",
-    "Blocks can overshoot; intraminute ordering is unknown. No synthetic exact-size bricks.",
-    "Every session starts a new block; unfinished session blocks remain as partial bars.",
-    "Bridges are visualization endpoints only: their high/low do not imply traded prices or known paths.",
-    "Session gaps use last observed minute close, not the official calculated daily closing index.",
-    "No exchange calendar is applied: entirely missing sessions cannot be distinguished from holidays.",
-    "375-minute template flags can include legitimate special sessions or trading halts.",
-    "Only completed minute candles may be passed in. The last partial block can grow on new input.",
-    "CSV labels are assumed minute-start IST and floored; duplicate minute buckets use first/max/min/last unless error policy is selected."
+    "1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision.",
+    "Normal OHLC is a synthetic close-based projection without wicks; observed OHLC is separate and never assigned as a brick's high/low.",
+    "Each crossed percentage threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
+    "Only minute closes confirm bricks. Multiple bricks from one close share known_at; intraminute crossing times are unknown.",
+    "source_minutes counts newly consumed observations; extra bricks from the same minute count zero. Sum counts only with partials included.",
+    "Every session starts a fresh anchor. Partial residuals are hidden by default; request include_partials=true to see them.",
+    "Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
+    "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
+    "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
+    "CSV minute-start IST labels are floored; minute collisions use first/max/min/last unless error policy is selected."
   ],
   "source_url": "https://raw.githubusercontent.com/sandeepkapri/Nifty50-Minute-Data/refs/heads/main/nifty50_candlestick_data.csv",
   "source_sha256": "9b347479bb242e8cea8f85011a4d53e8938c1bfea1697fa25d8ef25d8888784d",
   "validation": {
     "all_assertions_passed": true,
-    "checked_normal_bars": 3341,
+    "checked_normal_bricks": 1033,
+    "checked_partial_bars": 2317,
     "checked_bridge_bars": 2314,
-    "exactly_once_minute_coverage": 852083,
+    "exactly_once_minute_coverage_including_partials": 852083,
+    "maximum_normal_body_error_percentage_points": 2.3092638912203256e-14,
     "checks": [
-      "OHLC reconstruction",
-      "first close crossing",
-      "no partial bar crosses threshold",
-      "contiguous minutes within bars",
-      "daily reset",
-      "every minute used exactly once",
+      "actual normal OHLC body/range equals requested percentage",
+      "normal bricks connect without losing the remainder",
+      "partial remainder strictly below threshold",
+      "source OHLC separately reconstructed without assigning wicks",
+      "minute close confirms each brick; no earlier close already crossed",
+      "every minute counted exactly once including hidden partials",
       "gap endpoints and full size preserved"
     ]
   }

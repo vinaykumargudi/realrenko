@@ -1,17 +1,27 @@
-# RealRenko — percentage OHLC blocks with full-size gaps
+# RealRenko — exact percentage blocks with full-size gaps
 
-Convert the supplied NIFTY 50 minute history into user-selected percentage-move
-bars, return OHLC through a Python API, and plot opening gaps at their real size.
+Convert NIFTY 50 minute history into fixed-percentage Renko-style blocks, return
+OHLC through FastAPI, and plot overnight gaps as one full-size bar.
 
-**Defined behavior:** these are **whole-minute, close-confirmed percentage bars**,
-not classic fixed-size Renko bricks. A 1% input is a minimum absolute
-open-to-close move. Bars retain overshoots and actual observed wicks. Minute
-OHLC does not disclose whether high or low occurred first, so the converter
-never fabricates intraminute paths or exactly 1% closes.
+## Version 2 fixes normal-bar overshoots
 
-## Start the API
+**`percentage=1` now makes every completed normal block exactly +1% or -1%
+relative to that block's open.** The previous implementation treated 1% as a
+minimum and allowed normal 1.3%, 1.4%, and 2.18% bars. That behavior was wrong
+for the requested chart and has been removed.
 
-Python 3.10 or later:
+Excess movement carries into subsequent blocks within the session. Gap bars
+keep their complete size. Partial remainders are hidden by default.
+
+**OHLC semantics changed:** normal blocks now have calculated, wick-free OHLC.
+Actual source highs/lows remain separately available in `observed_ohlc` and
+`trigger_minute`. Minute OHLC cannot establish the true price path or crossing
+time for each synthetic block. This is a close-based projection, not tick
+reconstruction, and calculated boundaries are not promised execution prices.
+
+## Run or update
+
+Python 3.10+:
 
 ```bash
 git clone https://github.com/vinaykumargudi/realrenko.git
@@ -22,188 +32,184 @@ python -m pip install -r requirements.txt
 python nifty_bars.py --download --serve
 ```
 
-The first command downloads the fixed source URL only when `--download` is
-present. To restart without downloading again:
+If already installed, stop the running server with Ctrl+C, then:
 
 ```bash
+git pull --ff-only
 python nifty_bars.py --serve
 ```
 
-Endpoints:
+Restarting matters: an existing process still holds the previous code and
+cached results. Version 2 JSON identifies itself with
+`metadata.mode = "exact_percentage_close"` and `algorithm_version = "2.0.0"`.
 
 - JSON: http://127.0.0.1:8000/bars?percentage=1
-- Interactive chart: http://127.0.0.1:8000/chart?percentage=1&start=2020-03-01&end=2020-03-31
+- Chart: http://127.0.0.1:8000/chart?percentage=1&start=2020-03-01&end=2020-03-31
+- Include remainders: http://127.0.0.1:8000/chart?percentage=1&include_partials=true
 - API docs: http://127.0.0.1:8000/docs
 
-`percentage=1` means **1%**, and `percentage=0.5` means **0.5%**. The string
-`1%` is also accepted (URL encode the percent sign as `%25`). Dates use
-`YYYY-MM-DD`. Both start and end dates are inclusive. First conversion is
-computed from the complete CSV; the last four percentage/file-version results
-are cached per process. Date filtering happens afterward so changing the chart
-window does not change the blocks. The API binds to localhost by default.
+`1` means 1%, `0.5` means 0.5%; `1%` is also accepted (encode `%` as `%25`
+in URLs). `start` and `end` are inclusive IST dates, `YYYY-MM-DD`. Conversion
+precedes date filtering, so changing the window does not change block geometry.
 
-Alternatively, `uvicorn main:app --host 127.0.0.1 --port 8000` uses the
-downloaded CSV; set `NIFTY_CSV` to use a different local file with the same schema.
+The service reads the local downloaded CSV and caches four percentage/file
+versions per process. It does not download on each request. To use another
+local CSV, pass `--csv PATH` or set `NIFTY_CSV` when running
+`uvicorn main:app --host 127.0.0.1 --port 8000`. API defaults to localhost.
 
-## Exact calculation rules
+## Percentage calculation and leftover movement
 
-For a requested percentage `p`, bar open `O`, and latest minute close `C`:
+Let `A` be the current block anchor and `p` the requested percentage:
 
 ```python
-threshold_reached = abs(C - O) * Decimal(100) >= O * p
+upper = A * (1 + p / 100)
+lower = A * (1 - p / 100)
 ```
 
-- Open = first constituent minute's actual open.
-- High = maximum high of all constituent minutes.
-- Low = minimum low of all constituent minutes.
-- Close = last constituent minute's actual close.
-- Complete the block on the first minute close that reaches either threshold.
-- The next block begins with the **next minute's actual open**; it can differ
-  slightly from the previous close. Its percentage threshold is recalculated
-  from that open. There is no fixed-point brick size or two-brick reversal rule.
-- A move from 20,000 to 20,200 is +1%. From a new open of 20,200, the +1%
-  level is 20,402 and the -1% level is 19,998.
-- A minute closing at +1.18% produces a +1.18% bar. It is not rounded to 1%,
-  and excess movement is not copied into another synthetic bar.
-- An intraminute high crossing +1% while the close is only +0.2% does not finish
-  a bar. The high remains a wick. High-low range can exceed 1% in either kind.
-- Calculations use Decimal values parsed directly from CSV strings. JSON
-  prices become numbers only at the output boundary; threshold decisions never
-  use rounded output percentages.
+The first anchor is the observed session open. For each **completed minute
+close**, emit every crossed threshold. After each normal block, move the anchor
+to that block's calculated close. Keep that anchor for the next minute; do not
+reset it to the latest observed price. Reversals need one block, not the
+traditional two-block Renko reversal convention.
 
-## Gap up / gap down
+Examples for `p=1`, starting at 100:
 
-At every session change, an unfinished normal block is emitted as `partial`.
-The next session starts fresh. This deliberately prevents overnight gaps from
-being mixed with the previous session's unfinished move.
+| Observed close | Completed normal blocks | Remainder |
+| --- | --- | --- |
+| 101.3 | 100 → 101 | 101 → 101.3, pending |
+| 101.4 | 100 → 101 | 101 → 101.4, pending |
+| 102.18 | 100 → 101 → 102.01 | 102.01 → 102.18, pending |
+| 97.82 | 100 → 99 → 98.01 | 98.01 → 97.82, pending |
 
-| Previous last-minute close | New session open | Gap-bar OHLC | Move |
+Percentages **compound**: two +1% blocks total +2.01%. They are not two
+fixed one-point blocks. If a close reaches 103.2 from 100, the calculated closes
+are 101, 102.01, and 103.0301, leaving the remainder pending.
+
+For each completed normal block:
+
+- Open = previous anchor.
+- Close = exactly `open * (1 ± p/100)`.
+- High = `max(open, close)`; low = `min(open, close)`.
+- Both the body percentage and high-low percentage equal `p` (within numeric
+  precision). Raw candle wicks are never attached to these plotted blocks.
+- Decimal arithmetic is used for thresholds; JSON prices are floats. Do not
+  round prices before plotting or recalculate thresholds from rounded values.
+
+A source minute whose high crosses a level but whose close does not cross it
+will not produce a block. Multiple blocks from one close share `known_at`; no
+intraminute crossing order or timestamps are fabricated.
+
+## Gap handling and session reset
+
+At every session/data boundary, retain the last residual as a separately
+labelled partial, then reset the anchor to the next observed open.
+
+| Previous observed close | Next session open | One gap-bar OHLC | Move |
 | --- | --- | --- | --- |
 | 20,000 | 20,600 | O 20,000; H 20,600; L 20,000; C 20,600 | +3% |
 | 20,000 | 19,400 | O 20,000; H 20,000; L 19,400; C 19,400 | -3% |
 
-**Each is ONE full-size gap bar, even when the requested block size is 1%.**
-The next normal block begins at the new session's open. Smaller nonzero gaps
-are also shown; a zero overnight gap does not create a redundant bridge.
+Gaps are never split into 1% blocks. Their reference is the **actual previous
+observed close**, not the last calculated block boundary. Normal blocks after
+a gap restart at the new session open. Small nonzero overnight gaps are also
+preserved; zero gaps are omitted.
 
-Gap bars have `synthetic_bridge=true` and zero source minutes: their body
-connects two observed endpoints. Their high/low are endpoint extrema, not a
-claim that the index traded through every intermediate price. Do not use gap
-OHLC as executable trading prices in a backtest.
+`session_gap` requires normal-session endpoint minute labels 15:29 and 09:15.
+Missing intraday intervals or nonstandard session endpoints are `data_gap`:
+their endpoint displacement is shown, but the intervening path is unknown.
+These gap bodies do not claim trades occurred at intermediate prices.
 
-We use the previous **observed minute close**, which may differ from the
-official calculated daily closing index. Normal-session gap classification
-requires source minute labels 15:29 and 09:15. This matches the normal
-09:15–15:30 session when labels are minute starts. Other boundary times are
-flagged as `data_gap`, because the history alone cannot establish a normal
-overnight gap. Special sessions and halts require a richer exchange calendar
-if you need definitive classification.
+**Session reset remains enabled.** Remainders carry between minutes within a
+session, but do not carry across overnight or missing-data boundaries. They
+are retained as partial records and hidden by default; request
+`include_partials=true` or CLI `--include-partials` to inspect them. Consequently,
+not every observed price change creates a displayed normal block.
 
-**Daily reset means partial bars are expected.** A session that never reaches
-the selected percentage still appears as a partial OHLC bar. This is not a
-continuous multi-day classic Renko algorithm.
+## Output and plotting
 
-## Plot and output fields
-
-`/chart` uses sequential bar IDs for equal candle spacing and actual index
-levels on the y-axis. Gap bodies therefore retain their full size. Hovering
-shows original timestamps, OHLC, percentage change, and source minute count.
-
-| `kind` | Meaning | Plot color |
+| Kind | Meaning | Color |
 | --- | --- | --- |
-| `move` | First completed-minute close reached the percentage threshold | Green / red |
-| `session_gap` | Observed normal-session close to next session open | Blue / purple |
-| `partial` | Threshold not reached before a session/data boundary or input end | Grey |
-| `data_gap` | Missing interval or nonstandard session endpoints; path unknown | Amber |
+| `move` | Exact-percentage completed normal block | Green/red |
+| `session_gap` | Unsplit normal-session endpoint gap | Blue/purple |
+| `data_gap` | Unsplit unknown-interval endpoint bridge | Amber |
+| `partial` | Unfinished residual, only when requested | Grey |
 
-Every bar includes `open`, `high`, `low`, `close`, `move_pct`, `range_pct`,
-`start`, `end`, `known_at`, `bar_id`, `source_minutes`, `threshold_reached`,
-`finalized`, `synthetic_bridge`, and `reason`.
+The x-axis uses equal positions for returned blocks; elapsed time varies.
+Hover labels include OHLC, percentage, timestamps and bar type. Every normal
+block's actual plotted OHLC matches the requested percentage, not just its label.
 
-`start` is inclusive and `end` is the boundary after the last minute. A normal
-bar is known only at that minute's end. Gap endpoints are known at the new open.
-A pending block finalized when a discontinuity is detected records the new
-timestamp in `known_at`; do not use future finalization information earlier.
-The final `end_of_input` partial has `finalized=false` and can grow when new
-completed minutes arrive. Only completed source minute candles should be sent
-to the converter; it cannot detect an unfinished live candle from OHLC alone.
+Key fields:
 
-## Dataset and cleaning assumptions
+- `open`, `high`, `low`, `close`: **calculated block geometry**.
+- `move_pct`, `range_pct`: block movement/range as percentages of its open.
+- `synthetic_ohlc=true`: all returned block geometries are synthetic.
+- `synthetic_bridge=true`: only session/data-gap bridges, not normal blocks.
+- `observed_ohlc`: separately aggregated actual OHLC for newly consumed input
+  minutes; null for additional blocks generated by the same observation.
+  These observations are audit context, not an intrabrick trading path.
+- `trigger_minute`: the actual minute OHLC that confirmed a normal block or
+  last updated a partial; can repeat on multiple blocks. Null for gap bridges.
+- `source_minutes`: newly consumed minute count. Extra blocks from the same
+  minute have zero. Counts sum to all input minutes **only with partials included**.
+- `start`, `end`, `known_at`: source/confirmation bounds. Normal blocks are
+  known only at minute end; extra blocks from the same close can have equal
+  start/end bounds. Gap endpoints are known at the new open.
+- `finalized=false`: final `end_of_input` partial, which can change on more input.
 
-Source: [Nifty50-Minute-Data CSV](https://raw.githubusercontent.com/sandeepkapri/Nifty50-Minute-Data/refs/heads/main/nifty50_candlestick_data.csv).
-No market-data provider credentials are required. This is a third-party
-dataset, not independently verified exchange tick history.
+Pass completed input minutes only. This is a batch converter, without persisted
+live-stream/chunk continuation state. `metadata.bar_counts` counts all types,
+including hidden partials; `returned_bar_counts` describes the actual response.
 
-The downloaded snapshot has **852,087 rows**, spanning **9 January 2015,
-09:15 IST to 27 March 2024, 12:59 IST**, across 2,282 observed dates.
-It is not live/current market data.
+## Source data and explicit cleaning
 
-- Parse `Date` explicitly as `DD-MM-YYYY` and interpret times as IST.
-- Assume the source uses minute-start labels. The file itself does not provide
-  authoritative tick-level timing metadata.
-- **10,693 timestamps contain nonzero seconds.** Normalize these to their
-  minute labels, explicitly reporting the count.
-- **Four minutes contain two raw records after normalization.** Default
-  cleaning merges them chronologically using first open / maximum high /
-  minimum low / last close, reducing the series to **852,083 minute buckets**.
-  This is an explicit cleaning assumption, not proof of the vendor's intended
-  correction policy. Affected minute labels are listed in metadata.
-- To reject those four collisions, call
-  `read_minutes(path, duplicate_policy="error")`. Raw duplicate or out-of-order
-  timestamps are always rejected. Invalid OHLC, NaN, infinity, and nonpositive
-  prices also fail validation; no rows are silently skipped.
-- Missing intraday intervals interrupt aggregation. A `data_gap` bridge shows
-  endpoint displacement and does not invent the missing path.
-- Dates outside the normal 375-minute template are listed in metadata.
-  No official exchange calendar is applied, so completely missing sessions
-  cannot be distinguished from holidays. Never forward-fill missing prices.
+[Source CSV](https://raw.githubusercontent.com/sandeepkapri/Nifty50-Minute-Data/refs/heads/main/nifty50_candlestick_data.csv)
+is a third-party historical file, not a live feed or independently verified
+tick history. The tested snapshot has 852,087 raw rows from 9 January 2015,
+09:15 IST to 27 March 2024, 12:59 IST, across 2,282 observed dates.
 
-## Generate files or use from Python
+- Parse dates as `DD-MM-YYYY`; assume minute-start IST timestamp labels.
+- Floor 10,693 nonzero-second labels to the minute, reporting their count.
+- Four minute buckets contain two raw rows. Default cleaning uses chronological
+  first open / maximum high / minimum low / last close: 852,083 normalized
+  minutes. This assumption and affected timestamps appear in metadata.
+- Use `read_minutes(path, duplicate_policy="error")` to reject those collisions.
+  Raw duplicates, unsorted timestamps, invalid/nonpositive OHLC, NaN and infinity
+  always fail validation. There is no silent skipping or forward filling.
+- Missing intervals interrupt projection. Normal 375-minute session exceptions
+  are reported; no official exchange calendar is applied. Entire missing
+  sessions cannot be distinguished from holidays, and special sessions/halts
+  may be flagged as unknown boundaries.
+- Gap references use the last observed minute close, which can differ from the
+  official calculated daily closing index.
 
-```bash
-python nifty_bars.py --percentage 1 --output bars.json --html bars.html
-python nifty_bars.py --percentage 0.5 --start 2024-03-01 --end 2024-03-27 --output bars.json
-```
-
-The HTML is self-contained and works offline after generation. The standard
-library alone is sufficient for CSV-to-JSON conversion.
+## Python, files and verification
 
 ```python
 from nifty_bars import convert_minutes, read_minutes
 
-result = convert_minutes(read_minutes("nifty50_candlestick_data.csv"), percentage="1%")
-bars = result["bars"]
-print(bars[0])
-# Optional: pd.DataFrame(bars) if your existing application uses pandas.
+result = convert_minutes(read_minutes("nifty50_candlestick_data.csv"), "1%")
+blocks = result["bars"]
+# Optional: pandas.DataFrame(blocks)
 ```
 
-Existing services can call `convert_minutes()` with an iterable of `Candle`
-objects whose prices are Decimal and whose timestamps are minute-start IST.
-This implementation recomputes a batch; there is no persistent live-stream
-state or chunk-boundary continuation API.
-
-## Verification
-
 ```bash
+python nifty_bars.py --percentage 1 --output bars.json --html bars.html
+python nifty_bars.py --percentage 1 --include-partials --output bars.json
 python -m pip install -r requirements-dev.txt
 python -m unittest -v
 python validate_source.py --csv nifty50_candlestick_data.csv --percentage 1 --output validation.json
 ```
 
-All 14 unit/API tests passed. Tests cover exact threshold equality, decimal
-rounding, both gap directions, unsplit overshoots, ambiguous intraminute paths,
-missing data, unfinished blocks, normalization, invalid inputs, date filters,
-the JSON endpoint, and gap OHLC passed to the plot.
+Generated HTML works offline. CSV-to-JSON conversion requires only the standard
+library; plotting/API use the declared dependencies.
 
-The full-source 1% audit reconstructs every bar's OHLC from its constituent
-minutes, checks first threshold crossing, verifies each minute is used exactly
-once, and verifies every gap's endpoints. Results and the input SHA-256 are in
-`examples/validation_1pct.json`.
+Version 2 passed **17 tests**, including the reported +/−1.3%, 1.4%, and 2.18%
+overshoots, multiple blocks per minute, remainder carry, reversal, full gaps,
+partial filtering, API output, and actual OHLC passed to the chart.
 
-The snapshot produces 1,026 completed move bars, 2,315 partial bars, 2,257 normal
-session gaps, and 57 unknown-interval bridges. These are conversion counts,
-not backtest returns or evidence of strategy profitability.
-
-References: [FastAPI query parameters](https://fastapi.tiangolo.com/tutorial/query-params/),
-[Plotly candlesticks](https://plotly.com/python/candlestick-charts/),
-[NSE market timings](https://www.nseindia.com/static/market-data/market-timings).
+The full-source 1% audit checked **1,033 normal blocks**, 2,317 partials, and
+2,314 gap/unknown-interval bridges. Every normal block's actual returned body
+and range is 1%, with maximum floating-point error approximately 2.31e-14
+percentage points. All 852,083 normalized minutes are accounted for with
+partials included. See `examples/validation_1pct.json` for checks and source
+SHA-256. These counts are conversion results, not strategy returns.
