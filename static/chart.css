@@ -13,3 +13,7 @@
 .ath-color{color:#eab84f}.breakout-detail{font-size:10px;line-height:1.7;color:#eab84f;border-left:2px solid #eab84f;padding-left:10px;margin:14px 0}.toolbar #sizing-mode{max-width:135px}select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 
 .toolbar .atr-presets{display:flex}
+
+.instrument-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:9px 22px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}.instrument-toolbar label{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}.instrument-toolbar input,.instrument-toolbar select{height:32px;background:var(--field);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:5px 8px;font:inherit}.instrument-toolbar input{width:120px;font-weight:650;text-transform:uppercase}.source-hint{color:var(--muted);font-size:10px}.instrument-toolbar button:disabled{cursor:default}.source-hint.error{color:var(--red)}@media(max-width:650px){.instrument-toolbar{padding:8px 11px;gap:7px}.instrument-toolbar .source-hint{width:100%}}
+
+.pending-note{font-size:11px;line-height:1.65;color:var(--amber);border-left:2px solid var(--amber);padding-left:10px}.toolbar #session-mode{max-width:155px}

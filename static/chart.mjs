@@ -9,7 +9,7 @@ const dateLabel = iso => iso ? new Intl.DateTimeFormat('en-GB', { day: '2-digit'
 const timeLabel = iso => iso ? new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date(iso)) : '—';
 const format = value => Number.isFinite(value) ? number.format(value) : '—';
 const percent = value => Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}%` : '—';
-const state = { raw: [], rows: [], points: [], metadata: null, type: '', key: '', series: null, overlays: [], markers: null,
+const state = { symbol: 'NIFTY50', downloading: false, raw: [], rows: [], points: [], metadata: null, type: '', key: '', series: null, overlays: [], markers: null,
   controller: null, sequence: 0, selected: null, pinned: false, levels: [], priceLines: [], placing: false,
   auto: true, studyValues: new Map(), studies: { supertrend: false, atrPeriod: 10, factor: 3, ema: false, emaPeriod: 20, sma: false, smaPeriod: 50 } };
 let chart, toastTimer;
@@ -97,7 +97,7 @@ function inspect(b) {
     text('block-kind', 'No block selected'); return;
   }
   state.selected = b;
-  const kinds = { move: 'Full brick', session_gap: 'Session gap', data_gap: 'Unknown interval', partial: b.finalized === false ? 'Current remainder' : 'Session remainder', price: 'Daily price' };
+  const kinds = { move: 'Full brick', session_gap: 'Session gap', data_gap: 'Unknown interval', partial: b.reason === 'before_large_gap' ? 'Pre-gap remainder' : b.finalized === false ? 'Current remainder' : 'Session remainder', price: 'Daily price' };
   for (const k of ['open','high','low','close']) { text(`legend-${k}`, format(b[k])); text(`detail-${k}`, format(b[k])); }
   text('legend-move', percent(b.move_pct)); paintChange($('legend-move'), b.move_pct);
   text('detail-price', format(b.close));
@@ -191,11 +191,11 @@ function zoom(factor) {
 }
 function sizingQuery() {
   return $('sizing-mode').value === 'atr'
-    ? { sizing: 'atr', atr_period: $('brick-atr-period').value }
-    : { percentage: $('percentage').value || '1' };
+    ? { sizing: 'atr', atr_period: $('brick-atr-period').value, session_mode: $('session-mode').value }
+    : { percentage: $('percentage').value || '1', session_mode: $('session-mode').value };
 }
 function shareURL() {
-  const q = new URLSearchParams(sizingQuery());
+  const q = new URLSearchParams({ ...sizingQuery(), symbol: state.symbol });
   if ($('start-date').value) q.set('start', $('start-date').value);
   if ($('end-date').value) q.set('end', $('end-date').value);
   if ($('view-mode').value !== 'renko') q.set('view', $('view-mode').value);
@@ -203,7 +203,7 @@ function shareURL() {
   history.replaceState(null, '', `/chart?${q}`);
   const dataQuery = new URLSearchParams(q); dataQuery.delete('view'); dataQuery.delete('ath');
   if (state.type === 'renko') dataQuery.set('include_partials', 'true');
-  if (state.type !== 'renko') for (const name of ['percentage','include_partials','sizing','atr_period']) dataQuery.delete(name);
+  if (state.type !== 'renko') for (const name of ['percentage','include_partials','sizing','atr_period','session_mode']) dataQuery.delete(name);
   $('json-link').href = `${state.type === 'renko' ? '/bars' : '/history'}?${dataQuery}`;
 }
 function render(reset = true) {
@@ -228,19 +228,29 @@ function render(reset = true) {
   const counts = state.rows.reduce((a, b) => { a[b.kind] = (a[b.kind] || 0) + 1; return a; }, {});
   const renkoLabel = state.metadata.sizing === 'atr' ? `ATR(${state.metadata.atr_period}) · daily Renko` : `${state.metadata.percentage}% Renko`;
   text('chart-mode', state.type === 'renko' ? renkoLabel : $('view-mode').value === 'daily-line' ? 'Daily price trend' : 'Daily candles');
-  document.querySelector('.mode-tag').textContent = state.type === 'renko' ? 'Remainders + gaps' : 'Observed OHLC';
+  document.querySelector('.mode-tag').textContent = state.type === 'renko' ? (state.metadata.session_mode === 'daily' ? 'Daily remainders' : 'Confirmed moves') : 'Observed OHLC';
+  text('move-policy-label', state.metadata.session_mode === 'daily' ? 'Daily remainders shown' : 'Small moves carry forward');
   text('count-moves', String(counts.move || counts.price || 0)); $('count-moves').previousElementSibling.textContent = state.type === 'renko' ? 'Normal blocks' : 'Trading dates';
   text('count-gaps', String(counts.session_gap || 0)); text('count-unknown', String(counts.data_gap || 0));
   text('count-partials', String(counts.partial || 0));
+  instrumentLabels(state.metadata);
   text('dataset-dates', `${dateLabel(state.metadata.first_minute)} — ${dateLabel(state.metadata.last_minute)}`);
   text('ath-history-note', `*ATH = new source-history high since ${dateLabel(state.metadata.ath_history_start || state.metadata.first_minute)}. Earlier lifetime highs are unavailable.`);
+  const candidate = state.metadata.pending_move;
+  const pendingDate = candidate?.last_minute?.slice(0, 10) || state.metadata.last_minute.slice(0, 10);
+  const pending = candidate && (!$('start-date').value || pendingDate >= $('start-date').value)
+    && (!$('end-date').value || pendingDate <= $('end-date').value) ? candidate : null;
+  const noATR = state.metadata.sizing === 'atr' && !state.metadata.last_atr_points;
+  $('pending-note').hidden = !pending && !noATR;
+  text('pending-note', `${noATR ? `ATR(${state.metadata.atr_period}) unavailable: needs complete prior daily sessions. ` : ''}${pending ? `Unfinished move: ${format(pending.open)} → ${format(pending.last_price)} (${percent(pending.move_pct)}). Carried forward; no brick drawn.` : ''}`);
   const change = priceChange(state.rows), changeElement = $('window-return').querySelector('b');
   changeElement.textContent = percent(change); paintChange(changeElement, change);
   $('window-return').title = 'First open to last close across the loaded date window; not strategy returns.';
   $('export-button').disabled = !state.rows.length;
   if (!state.rows.length) {
-    overlay('No prices in this window', 'Choose a date range within the available dataset dates shown in the inspector.');
-    inspect(null); text('status-text', 'No matching data'); $('status-dot').classList.remove('ready');
+    if (!state.raw.length && state.type === 'renko') overlay(noATR ? 'ATR needs more complete history' : 'No confirmed bricks yet', $('pending-note').textContent || 'The selected move threshold has not been reached.');
+    else overlay('No prices in this window', 'Choose a date range within the available dataset dates shown in the inspector.');
+    inspect(null); text('status-text', !state.raw.length && state.type === 'renko' ? 'No confirmed bricks' : 'No matching data'); $('status-dot').classList.remove('ready');
   } else {
     $('chart-overlay').hidden = true;
     if (reset) { if ($('start-date').value || $('end-date').value) fitAll(); else latest(); }
@@ -254,12 +264,14 @@ function render(reset = true) {
   shareURL();
 }
 async function loadData() {
+  if (state.downloading) return;
   const type = $('view-mode').value === 'renko' ? 'renko' : 'daily';
   updateModeControls(type);
   if (!$('controls').reportValidity()) return;
   if (type === 'renko' && $('sizing-mode').value === 'atr' && !Number.isSafeInteger(Number($('brick-atr-period').value))) { toast('ATR length must be a positive whole number.'); return; }
   if ($('start-date').value && $('end-date').value && $('start-date').value > $('end-date').value) { toast('The start date must be before the end date.'); return; }
   const query = type === 'renko' ? new URLSearchParams({ ...sizingQuery(), include_partials: 'true' }) : new URLSearchParams();
+  query.set('symbol', state.symbol);
   const key = `${type}:${query}`;
   state.controller?.abort();
   const sequence = ++state.sequence;
@@ -282,12 +294,12 @@ async function loadData() {
 }
 function updateModeControls(type) {
   const atrSizing = $('sizing-mode').value === 'atr';
-  $('sizing-mode').disabled = type !== 'renko';
+  $('sizing-mode').disabled = type !== 'renko'; $('session-mode').disabled = type !== 'renko';
   $('percentage-control').hidden = atrSizing; $('percentage-presets').hidden = atrSizing;
   $('atr-control').hidden = !atrSizing; $('atr-presets').hidden = !atrSizing;
   for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]')]) element.disabled = type !== 'renko' || atrSizing;
   for (const element of [$('brick-atr-period'), ...document.querySelectorAll('[data-atr]')]) element.disabled = type !== 'renko' || !atrSizing;
-  text('indicator-basis', type === 'renko' ? 'All Renko bricks, including daily remainders and gap bars. Values on the current remainder can change with new minutes.' : 'Observed daily OHLC, with all available prior dates used for warm-up.');
+  text('indicator-basis', type === 'renko' ? 'Displayed confirmed bricks and any explicit remainders/gap bars. Unfinished moves are excluded in Confirmed moves mode.' : 'Observed daily OHLC, with all available prior dates used for warm-up.');
 }
 function changeTheme() {
   const dark = document.documentElement.dataset.theme !== 'dark';
@@ -295,12 +307,83 @@ function changeTheme() {
   try { localStorage.setItem('realrenko-theme', dark ? 'dark' : 'light'); } catch {}
   chart.applyOptions(themeOptions()); if (state.metadata) render(false);
 }
+function requestedSymbol() {
+  const symbol = $('symbol-input').value.trim().toUpperCase().replace(/\.NS$/, '');
+  if (!/^[A-Z0-9][A-Z0-9&-]{0,29}$/.test(symbol)) throw new Error('Use an NSE symbol such as TCS, INFY or RELIANCE.');
+  return symbol;
+}
+function instrumentLabels(metadata = {}) {
+  const symbol = metadata.symbol || state.symbol;
+  const label = metadata.display_name || (symbol === 'NIFTY50' ? 'NIFTY 50' : symbol);
+  for (const id of ['symbol-title','chart-symbol','watermark-symbol']) text(id, label);
+  text('symbol-icon', label[0]);
+  text('symbol-exchange', symbol === 'NIFTY50' ? 'NSE · Index' : 'NSE · Equity · INR');
+  document.title = `RealRenko · ${label}`;
+  $('chart').setAttribute('aria-label', `Interactive ${label} Renko or daily prices. Drag to pan; scroll to zoom.`);
+  text('source-provider', metadata.source_provider || 'Historical dataset');
+  text('source-note', metadata.source_provider?.startsWith('Yahoo')
+    ? `Recent 1-minute prices · ${metadata.downloaded_minutes?.toLocaleString('en-IN') || '—'} minutes. Stocks can gap. Missing minutes stay missing. No local split/dividend adjustment. Downloaded ${dateLabel(metadata.downloaded_at)}.`
+    : 'Observed source prices. Opening gaps and missing intervals are preserved.');
+  $('source-note').title = metadata.source_limitations || '';
+  const range = document.querySelector('[data-range="2015-2020"]');
+  range.hidden = symbol !== 'NIFTY50';
+}
+function selectInstrument(symbol, refresh = false) {
+  if (symbol === state.symbol && !refresh) return;
+  state.controller?.abort(); ++state.sequence;
+  if (symbol !== state.symbol) state.levels = [];
+  state.symbol = symbol; state.key = ''; state.metadata = null;
+  state.raw = []; state.rows = []; state.points = []; state.selected = null; $('pending-note').hidden = true;
+  state.markers?.detach(); state.markers = null;
+  for (const s of state.overlays) chart.removeSeries(s); state.overlays = [];
+  if (state.series) chart.removeSeries(state.series); state.series = null; state.priceLines = [];
+  state.pinned = false; $('export-button').disabled = true;
+  $('start-date').value = ''; $('end-date').value = '';
+  for (const id of ['dataset-dates','visible-range','ath-history-note','count-moves','count-gaps','count-unknown','count-partials']) text(id, '—');
+  $('window-return').querySelector('b').textContent = '—';
+  $('indicator-legend').replaceChildren();
+  inspect(null); instrumentLabels(); shareURL();
+}
+async function downloadAndPlot() {
+  if (state.downloading) return;
+  let symbol;
+  try { symbol = requestedSymbol(); } catch (e) { toast(e.message); return; }
+  if (symbol === 'NIFTY50') { toast('Use Load saved for the original NIFTY history. Choose a stock to download recent minutes.'); return; }
+  selectInstrument(symbol, true);
+  state.downloading = true; $('symbol-input').disabled = true;
+  $('download-button').disabled = true; $('instrument-form').querySelector('[type="submit"]').disabled = true;
+  $('download-hint').classList.remove('error'); text('download-hint', `Downloading ${symbol} one-minute prices…`);
+  overlay(`Downloading ${symbol}`, 'Fetching recent minute candles. This can take up to two minutes. Existing saved data is retained if the download fails.', { loading: true });
+  text('status-text', 'Downloading…'); $('status-dot').classList.remove('ready');
+  let success = false;
+  try {
+    const response = await fetch(`/download?${new URLSearchParams({symbol, days: $('download-days').value})}`, {method: 'POST'});
+    const result = await response.json();
+    if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Could not download this stock.');
+    text('download-hint', `${symbol} · ${result.metadata.downloaded_minutes.toLocaleString('en-IN')} minutes downloaded`);
+    success = true;
+  } catch (e) {
+    $('download-hint').classList.add('error'); text('download-hint', 'Download failed. Load saved to open any previous snapshot.');
+    overlay('Download unavailable', e.message); text('status-text', 'Download failed');
+  } finally {
+    state.downloading = false; $('symbol-input').disabled = false; $('download-button').disabled = false;
+    $('instrument-form').querySelector('[type="submit"]').disabled = false;
+    $('apply-button').disabled = false;
+  }
+  if (success) await loadData();
+}
 function events() {
+  $('instrument-form').addEventListener('submit', event => {
+    event.preventDefault(); if (state.downloading) return;
+    try { selectInstrument(requestedSymbol()); loadData(); } catch (e) { toast(e.message); }
+  });
+  $('download-button').addEventListener('click', downloadAndPlot);
   $('controls').addEventListener('submit', event => { event.preventDefault(); loadData(); });
   $('retry-button').addEventListener('click', loadData);
   $('view-mode').addEventListener('change', loadData);
   $('show-ath').addEventListener('change', () => { state.markers?.setMarkers($('show-ath').checked ? breakoutMarkers(state.rows, state.points) : []); shareURL(); });
   $('sizing-mode').addEventListener('change', loadData);
+  $('session-mode').addEventListener('change', loadData);
   for (const b of document.querySelectorAll('[data-percent]')) b.addEventListener('click', () => { $('percentage').value = b.dataset.percent; loadData(); });
   for (const b of document.querySelectorAll('[data-atr]')) b.addEventListener('click', () => { $('brick-atr-period').value = b.dataset.atr; loadData(); });
   for (const button of document.querySelectorAll('[data-range]')) button.addEventListener('click', async () => {
@@ -351,7 +434,7 @@ function events() {
     catch { toast('Your browser did not allow fullscreen.'); }
   });
   $('export-button').addEventListener('click', () => {
-    try { const a = document.createElement('a'); a.href = chart.takeScreenshot().toDataURL('image/png'); a.download = 'realrenko-nifty50.png'; a.click(); }
+    try { const a = document.createElement('a'); a.href = chart.takeScreenshot().toDataURL('image/png'); a.download = `realrenko-${state.symbol.toLowerCase()}.png`; a.click(); }
     catch { toast('Could not export the chart in this browser.'); }
   });
   $('help-button').addEventListener('click', () => $('help-dialog').showModal());
@@ -374,8 +457,11 @@ try {
   if (!L) throw new Error('Chart library did not load. Pull the complete repository, including static/vendor, and restart the server.');
   try { document.documentElement.dataset.theme = localStorage.getItem('realrenko-theme') === 'light' ? 'light' : 'dark'; } catch {}
   const q = new URLSearchParams(location.search);
+  $('symbol-input').value = q.get('symbol') || document.documentElement.dataset.defaultSymbol || 'NIFTY50';
+  state.symbol = requestedSymbol(); instrumentLabels();
   const p = Number((q.get('percentage') || '1').replace('%', ''));
   if (Number.isFinite(p) && p > 0 && p < 100) $('percentage').value = String(p);
+  if (q.get('session_mode') === 'daily') $('session-mode').value = 'daily';
   if (q.get('sizing') === 'atr') $('sizing-mode').value = 'atr';
   if (q.has('atr_period')) $('brick-atr-period').value = q.get('atr_period');
   $('show-ath').checked = q.get('ath') !== 'false';

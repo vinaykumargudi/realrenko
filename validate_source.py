@@ -7,6 +7,11 @@ from pathlib import Path
 
 from nifty_bars import MINUTE, SOURCE_URL, convert_minutes, parse_percent, read_minutes
 
+# These established fixtures exercise the retained daily-remainder policy.
+# Default threshold-mode behavior is covered separately in test_threshold_mode.py.
+from functools import partial as bind_policy
+convert_minutes = bind_policy(convert_minutes, session_mode="daily")
+
 
 def audit(path: Path, percentage='1', bars_output: Path | None = None):
     p = parse_percent(percentage)

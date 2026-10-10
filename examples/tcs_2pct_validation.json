@@ -1,0 +1,652 @@
+{
+  "metadata": {
+    "algorithm_version": "2.5.0",
+    "percentage": 2.0,
+    "mode": "exact_percentage_close",
+    "sizing": "percentage",
+    "session_mode": "threshold",
+    "pending_move": {
+      "open": 2184.473539077276,
+      "last_price": 2156.0,
+      "move_pct": -1.303450857514314,
+      "source_minutes": 327,
+      "start": "2026-10-09T09:49:00+05:30",
+      "last_minute": "2026-10-09T15:15:00+05:30",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2188.300048828125,
+        "high": 2202.0,
+        "low": 2152.0,
+        "close": 2156.0
+      }
+    },
+    "absorbed_small_session_gaps": 0,
+    "absorbed_unknown_intervals": 17,
+    "include_partials": true,
+    "timezone": "Asia/Kolkata",
+    "timestamp_convention": "minute_start",
+    "first_minute": "2026-09-15T09:15:00+05:30",
+    "last_minute": "2026-10-09T15:15:00+05:30",
+    "source_minutes": 6495,
+    "observed_sessions": 18,
+    "source_rows": 6495,
+    "bar_counts": {
+      "move": 12
+    },
+    "returned_bar_counts": {
+      "move": 12
+    },
+    "missing_intraday_intervals": 0,
+    "timestamp_labels_floored_to_minute": 0,
+    "merged_minute_buckets": [],
+    "sessions_outside_normal_375_minute_template": [
+      {
+        "date": "2026-09-15",
+        "first": "2026-09-15T09:15:00+05:30",
+        "last": "2026-09-15T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-16",
+        "first": "2026-09-16T09:15:00+05:30",
+        "last": "2026-09-16T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-17",
+        "first": "2026-09-17T09:15:00+05:30",
+        "last": "2026-09-17T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-18",
+        "first": "2026-09-18T09:15:00+05:30",
+        "last": "2026-09-18T15:14:00+05:30",
+        "minutes": 360
+      },
+      {
+        "date": "2026-09-21",
+        "first": "2026-09-21T09:15:00+05:30",
+        "last": "2026-09-21T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-22",
+        "first": "2026-09-22T09:15:00+05:30",
+        "last": "2026-09-22T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-23",
+        "first": "2026-09-23T09:15:00+05:30",
+        "last": "2026-09-23T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-24",
+        "first": "2026-09-24T09:15:00+05:30",
+        "last": "2026-09-24T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-25",
+        "first": "2026-09-25T09:15:00+05:30",
+        "last": "2026-09-25T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-28",
+        "first": "2026-09-28T09:15:00+05:30",
+        "last": "2026-09-28T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-29",
+        "first": "2026-09-29T09:15:00+05:30",
+        "last": "2026-09-29T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-09-30",
+        "first": "2026-09-30T09:15:00+05:30",
+        "last": "2026-09-30T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-10-01",
+        "first": "2026-10-01T09:15:00+05:30",
+        "last": "2026-10-01T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-10-05",
+        "first": "2026-10-05T09:15:00+05:30",
+        "last": "2026-10-05T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-10-06",
+        "first": "2026-10-06T09:15:00+05:30",
+        "last": "2026-10-06T15:14:00+05:30",
+        "minutes": 360
+      },
+      {
+        "date": "2026-10-07",
+        "first": "2026-10-07T09:15:00+05:30",
+        "last": "2026-10-07T15:15:00+05:30",
+        "minutes": 361
+      },
+      {
+        "date": "2026-10-08",
+        "first": "2026-10-08T09:15:00+05:30",
+        "last": "2026-10-08T15:14:00+05:30",
+        "minutes": 360
+      },
+      {
+        "date": "2026-10-09",
+        "first": "2026-10-09T09:15:00+05:30",
+        "last": "2026-10-09T15:15:00+05:30",
+        "minutes": 361
+      }
+    ],
+    "notes": [
+      "1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision.",
+      "Normal OHLC is a synthetic close-based projection without wicks; observed OHLC is separate and never assigned as a brick's high/low.",
+      "Each crossed sizing threshold emits a brick. Reversal uses one brick. Threshold mode carries unfinished displacement across sessions; daily mode flushes every session.",
+      "Minute closes confirm ordinary bricks; threshold mode also processes observed session/post-missing-data opens at their opening timestamp. No current minute high/close is used for an opening-confirmed brick.",
+      "source_minutes counts newly consumed observations; extra bricks from one observation count zero. Sum displayed counts plus pending_move counts, with partials included.",
+      "Threshold mode: only gaps at or above the chosen percent of the previous observed close (or current ATR point size) split out. A nonzero preceding remainder is emitted immediately before that full gap. No day-end or final partial is plotted. Daily mode retains the earlier daily remainder behavior.",
+      "Every displayed percentage uses its own brick's open. Remainders preserve actual price displacement without rounding to a full brick.",
+      "Small missing-interval endpoint changes can complete normal bricks in threshold mode; their confirmation is explicitly labeled and the missing path remains unknown. Large unknown-interval bridges stay classified data_gap. Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
+      "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
+      "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
+      "CSV minute-start IST labels are floored; minute collisions use first/max/min/last unless error policy is selected.",
+      "ATH markers mean strictly new highs within available source history, not verified lifetime highs. The first source high seeds the baseline; ties do not break out.",
+      "Breakouts use observed minute highs (or a gap's opening price), not Renko highs or closing-price confirmation. Events are grouped once onto the brick consuming their observations."
+    ],
+    "ath_reference": "available_source_history",
+    "ath_history_start": "2026-09-15T09:15:00+05:30",
+    "ath_latest_high": 2322.800048828125,
+    "ath_breakout_observations": 7,
+    "symbol": "TCS",
+    "instrument": "TCS",
+    "display_name": "TCS",
+    "instrument_type": "equity",
+    "currency": "INR",
+    "exchange": "NSE",
+    "provider_symbol": "TCS.NS",
+    "source_provider": "Yahoo Finance (unofficial chart endpoint)",
+    "source_url": "https://finance.yahoo.com/quote/TCS.NS/history/",
+    "interval": "1m",
+    "requested_days": 28,
+    "downloaded_at": "2026-10-10T17:03:32.870389+00:00",
+    "source_sha256": "09d788e07c6573af6a32f735327370b907ee1b77920e7d66672f5e1e2f24ef2e",
+    "downloaded_minutes": 6495,
+    "skipped_rows": {
+      "missing_ohlc": 255,
+      "outside_request_or_incomplete": 3
+    },
+    "download_requests": [
+      {
+        "start": "2026-09-12T17:03:00+00:00",
+        "end_exclusive": "2026-09-19T17:03:00+00:00",
+        "returned_timestamps": 1501
+      },
+      {
+        "start": "2026-09-19T17:03:00+00:00",
+        "end_exclusive": "2026-09-26T17:03:00+00:00",
+        "returned_timestamps": 1876
+      },
+      {
+        "start": "2026-09-26T17:03:00+00:00",
+        "end_exclusive": "2026-10-03T17:03:00+00:00",
+        "returned_timestamps": 1501
+      },
+      {
+        "start": "2026-10-03T17:03:00+00:00",
+        "end_exclusive": "2026-10-10T17:03:00+00:00",
+        "returned_timestamps": 1875
+      }
+    ],
+    "corporate_actions": [],
+    "price_adjustment": "Provider OHLC as returned; no local dividend/split adjustment, tick rounding or gap removal.",
+    "source_limitations": "Recent minute history only (requested at most 28 days); availability and completeness are not guaranteed. Regular session only. Missing bars are not filled. Stocks can gap. ATH* is a record within downloaded history, not lifetime ATH. Splits/dividends can affect comparisons.",
+    "validation": {
+      "exact_full_bricks": true,
+      "connected_boundaries": true,
+      "all_source_minutes_accounted_for": true,
+      "all_high_observations_accounted_for": true,
+      "no_ordinary_day_end_partials": true,
+      "independent_exchange_price_verification": false
+    }
+  },
+  "bars": [
+    {
+      "bar_id": 0,
+      "kind": "move",
+      "start": "2026-09-15T09:15:00+05:30",
+      "end": "2026-09-16T09:39:00+05:30",
+      "known_at": "2026-09-16T09:39:00+05:30",
+      "open": 2279.10009765625,
+      "high": 2279.10009765625,
+      "low": 2233.518095703125,
+      "close": 2233.518095703125,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 385,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": {
+        "previous_high": 2282.89990234375,
+        "high": 2322.800048828125,
+        "first_at": "2026-09-15T09:16:00+05:30",
+        "last_at": "2026-09-15T11:05:00+05:30",
+        "known_at": "2026-09-15T11:06:00+05:30",
+        "count": 7
+      },
+      "observed_ohlc": {
+        "open": 2279.10009765625,
+        "high": 2322.800048828125,
+        "low": 2226.699951171875,
+        "close": 2228.5
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-16T09:38:00+05:30",
+        "open": 2233.39990234375,
+        "high": 2234.199951171875,
+        "low": 2226.699951171875,
+        "close": 2228.5
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2228.5
+    },
+    {
+      "bar_id": 1,
+      "kind": "move",
+      "start": "2026-09-16T09:39:00+05:30",
+      "end": "2026-09-16T14:29:00+05:30",
+      "known_at": "2026-09-16T14:29:00+05:30",
+      "open": 2233.518095703125,
+      "high": 2233.518095703125,
+      "low": 2188.8477337890627,
+      "close": 2188.8477337890627,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 290,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2225.800048828125,
+        "high": 2240.89990234375,
+        "low": 2188.0,
+        "close": 2188.800048828125
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-16T14:28:00+05:30",
+        "open": 2190.800048828125,
+        "high": 2191.5,
+        "low": 2188.0,
+        "close": 2188.800048828125
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2188.800048828125
+    },
+    {
+      "bar_id": 2,
+      "kind": "move",
+      "start": "2026-09-16T14:29:00+05:30",
+      "end": "2026-09-17T14:47:00+05:30",
+      "known_at": "2026-09-17T14:47:00+05:30",
+      "open": 2188.8477337890627,
+      "high": 2232.6246884648435,
+      "low": 2188.8477337890627,
+      "close": 2232.6246884648435,
+      "move_pct": 2.0,
+      "range_pct": 2.0,
+      "direction": "up",
+      "source_minutes": 379,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2188.60009765625,
+        "high": 2238.0,
+        "low": 2163.199951171875,
+        "close": 2238.0
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-17T14:46:00+05:30",
+        "open": 2234.0,
+        "high": 2238.0,
+        "low": 2230.800048828125,
+        "close": 2238.0
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2238.0
+    },
+    {
+      "bar_id": 3,
+      "kind": "move",
+      "start": "2026-09-17T14:47:00+05:30",
+      "end": "2026-09-18T09:15:00+05:30",
+      "known_at": "2026-09-18T09:15:00+05:30",
+      "open": 2232.6246884648435,
+      "high": 2232.6246884648435,
+      "low": 2187.972194695547,
+      "close": 2187.972194695547,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 29,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_observed_open_after_missing_data_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2238.39990234375,
+        "high": 2262.800048828125,
+        "low": 2175.0,
+        "close": 2175.0
+      },
+      "trigger_minute": null,
+      "confirmation": "observed_open_after_missing_data",
+      "confirmation_price": 2175.0
+    },
+    {
+      "bar_id": 4,
+      "kind": "move",
+      "start": "2026-09-18T09:15:00+05:30",
+      "end": "2026-09-18T09:16:00+05:30",
+      "known_at": "2026-09-18T09:16:00+05:30",
+      "open": 2187.972194695547,
+      "high": 2187.972194695547,
+      "low": 2144.212750801636,
+      "close": 2144.212750801636,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 1,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2175.0,
+        "high": 2175.0,
+        "low": 2132.0,
+        "close": 2134.0
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-18T09:15:00+05:30",
+        "open": 2175.0,
+        "high": 2175.0,
+        "low": 2132.0,
+        "close": 2134.0
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2134.0
+    },
+    {
+      "bar_id": 5,
+      "kind": "move",
+      "start": "2026-09-18T09:16:00+05:30",
+      "end": "2026-09-21T09:15:00+05:30",
+      "known_at": "2026-09-21T09:15:00+05:30",
+      "open": 2144.212750801636,
+      "high": 2144.212750801636,
+      "low": 2101.328495785603,
+      "close": 2101.328495785603,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 359,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_observed_open_after_missing_data_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2134.300048828125,
+        "high": 2140.60009765625,
+        "low": 2090.0,
+        "close": 2090.0
+      },
+      "trigger_minute": null,
+      "confirmation": "observed_open_after_missing_data",
+      "confirmation_price": 2090.0
+    },
+    {
+      "bar_id": 6,
+      "kind": "move",
+      "start": "2026-09-21T09:15:00+05:30",
+      "end": "2026-09-21T15:01:00+05:30",
+      "known_at": "2026-09-21T15:01:00+05:30",
+      "open": 2101.328495785603,
+      "high": 2143.355065701315,
+      "low": 2101.328495785603,
+      "close": 2143.355065701315,
+      "move_pct": 2.0,
+      "range_pct": 2.0,
+      "direction": "up",
+      "source_minutes": 346,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2090.0,
+        "high": 2143.39990234375,
+        "low": 2078.39990234375,
+        "close": 2143.39990234375
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-21T15:00:00+05:30",
+        "open": 2139.39990234375,
+        "high": 2143.39990234375,
+        "low": 2139.10009765625,
+        "close": 2143.39990234375
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2143.39990234375
+    },
+    {
+      "bar_id": 7,
+      "kind": "move",
+      "start": "2026-09-21T15:01:00+05:30",
+      "end": "2026-09-22T15:11:00+05:30",
+      "known_at": "2026-09-22T15:11:00+05:30",
+      "open": 2143.355065701315,
+      "high": 2143.355065701315,
+      "low": 2100.487964387289,
+      "close": 2100.487964387289,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 371,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2144.5,
+        "high": 2144.5,
+        "low": 2099.89990234375,
+        "close": 2100.0
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-22T15:10:00+05:30",
+        "open": 2102.10009765625,
+        "high": 2102.199951171875,
+        "low": 2099.89990234375,
+        "close": 2100.0
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2100.0
+    },
+    {
+      "bar_id": 8,
+      "kind": "move",
+      "start": "2026-09-22T15:11:00+05:30",
+      "end": "2026-09-25T09:17:00+05:30",
+      "known_at": "2026-09-25T09:17:00+05:30",
+      "open": 2100.487964387289,
+      "high": 2100.487964387289,
+      "low": 2058.478205099543,
+      "close": 2058.478205099543,
+      "move_pct": -2.0,
+      "range_pct": 2.0,
+      "direction": "down",
+      "source_minutes": 729,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2100.0,
+        "high": 2105.0,
+        "low": 2047.5,
+        "close": 2049.800048828125
+      },
+      "trigger_minute": {
+        "timestamp": "2026-09-25T09:16:00+05:30",
+        "open": 2062.300048828125,
+        "high": 2062.300048828125,
+        "low": 2047.5,
+        "close": 2049.800048828125
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2049.800048828125
+    },
+    {
+      "bar_id": 9,
+      "kind": "move",
+      "start": "2026-09-25T09:17:00+05:30",
+      "end": "2026-10-05T09:31:00+05:30",
+      "known_at": "2026-10-05T09:31:00+05:30",
+      "open": 2058.478205099543,
+      "high": 2099.647769201534,
+      "low": 2058.478205099543,
+      "close": 2099.647769201534,
+      "move_pct": 2.0,
+      "range_pct": 2.0,
+      "direction": "up",
+      "source_minutes": 1819,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2047.4000244140625,
+        "high": 2105.5,
+        "low": 2032.4000244140625,
+        "close": 2105.0
+      },
+      "trigger_minute": {
+        "timestamp": "2026-10-05T09:30:00+05:30",
+        "open": 2097.39990234375,
+        "high": 2105.5,
+        "low": 2096.800048828125,
+        "close": 2105.0
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2105.0
+    },
+    {
+      "bar_id": 10,
+      "kind": "move",
+      "start": "2026-10-05T09:31:00+05:30",
+      "end": "2026-10-09T09:17:00+05:30",
+      "known_at": "2026-10-09T09:17:00+05:30",
+      "open": 2099.647769201534,
+      "high": 2141.640724585565,
+      "low": 2099.647769201534,
+      "close": 2141.640724585565,
+      "move_pct": 2.0,
+      "range_pct": 2.0,
+      "direction": "up",
+      "source_minutes": 1428,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2104.89990234375,
+        "high": 2150.300048828125,
+        "low": 2060.0,
+        "close": 2150.300048828125
+      },
+      "trigger_minute": {
+        "timestamp": "2026-10-09T09:16:00+05:30",
+        "open": 2124.89990234375,
+        "high": 2150.300048828125,
+        "low": 2124.89990234375,
+        "close": 2150.300048828125
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2150.300048828125
+    },
+    {
+      "bar_id": 11,
+      "kind": "move",
+      "start": "2026-10-09T09:17:00+05:30",
+      "end": "2026-10-09T09:49:00+05:30",
+      "known_at": "2026-10-09T09:49:00+05:30",
+      "open": 2141.640724585565,
+      "high": 2184.473539077276,
+      "low": 2141.640724585565,
+      "close": 2184.473539077276,
+      "move_pct": 2.0,
+      "range_pct": 2.0,
+      "direction": "up",
+      "source_minutes": 32,
+      "synthetic_ohlc": true,
+      "synthetic_bridge": false,
+      "threshold_reached": true,
+      "finalized": true,
+      "reason": "exact_percentage_minute_close_projection",
+      "ath_breakout": null,
+      "observed_ohlc": {
+        "open": 2148.199951171875,
+        "high": 2190.800048828125,
+        "low": 2145.199951171875,
+        "close": 2188.699951171875
+      },
+      "trigger_minute": {
+        "timestamp": "2026-10-09T09:48:00+05:30",
+        "open": 2181.0,
+        "high": 2190.800048828125,
+        "low": 2180.0,
+        "close": 2188.699951171875
+      },
+      "confirmation": "minute_close",
+      "confirmation_price": 2188.699951171875
+    }
+  ]
+}

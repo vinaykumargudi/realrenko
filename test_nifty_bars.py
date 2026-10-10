@@ -9,6 +9,11 @@ from pathlib import Path
 
 from nifty_bars import Candle, IST, convert_minutes, create_app, filter_result, make_chart, parse_percent, read_minutes
 
+# These established fixtures exercise the retained daily-remainder policy.
+# Default threshold-mode behavior is covered separately in test_threshold_mode.py.
+from functools import partial as bind_policy
+convert_minutes = bind_policy(convert_minutes, session_mode="daily")
+
 
 def c(ts, o, h=None, l=None, close=None):
     o, close = D(str(o)), D(str(o if close is None else close))
@@ -221,12 +226,12 @@ class IntegrationTests(unittest.TestCase):
             source.write_text('Instrument,Date,Time,Open,High,Low,Close\n'
                               'Nifty50,01-01-2024,15:29:00,100,104,100,104\n'
                               'Nifty50,02-01-2024,09:15:00,105.04,105.04,105.04,105.04\n')
-            command = [sys.executable, str(Path(__file__).with_name('nifty_bars.py')),
+            command = [sys.executable, str(Path(__file__).with_name('nifty_bars.py')), '--session-mode', 'daily',
                        '--csv', str(source), '--output', str(output), '--percentage', '3']
             subprocess.run(command, check=True, capture_output=True, text=True)
             result = json.loads(output.read_text())
             self.assertEqual([b['kind'] for b in result['bars']], ['move', 'partial', 'session_gap', 'partial'])
-            client_result = TestClient(create_app(source)).get('/bars?percentage=3').json()
+            client_result = TestClient(create_app(source)).get('/bars?session_mode=daily&percentage=3').json()
             self.assertEqual(client_result['bars'], result['bars'])
             subprocess.run(command + ['--no-include-partials'], check=True, capture_output=True, text=True)
             self.assertEqual([b['kind'] for b in json.loads(output.read_text())['bars']], ['move', 'session_gap'])
@@ -245,19 +250,19 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(result['metadata']['mode'], 'exact_percentage_close')
             self.assertTrue(self.assert_exact(result['bars']))
             self.assertIn('partial', [b['kind'] for b in result['bars']])
-            sparse = client.get('/bars?percentage=1&include_partials=false').json()
+            sparse = client.get('/bars?session_mode=daily&percentage=1&include_partials=false').json()
             self.assertNotIn('partial', [b['kind'] for b in sparse['bars']])
             gap = next(b for b in result['bars'] if b['kind'] == 'session_gap')
             self.assertEqual(gap['move_pct'], 3)
-            self.assertEqual(client.get('/bars?percentage=NaN').status_code, 422)
-            self.assertEqual(client.get('/bars?start=2024-02-01&end=2024-01-01').status_code, 422)
-            full_result = client.get('/bars?percentage=1&include_partials=true').json()
+            self.assertEqual(client.get('/bars?session_mode=daily&percentage=NaN').status_code, 422)
+            self.assertEqual(client.get('/bars?session_mode=daily&start=2024-02-01&end=2024-01-01').status_code, 422)
+            full_result = client.get('/bars?session_mode=daily&percentage=1&include_partials=true').json()
             self.assertIn('partial', [b['kind'] for b in full_result['bars']])
             self.assertEqual(sum(b['source_minutes'] for b in full_result['bars']), 2)
             html = client.get('/chart?percentage=1')
             self.assertEqual(html.status_code, 200, html.text[:200])
             self.assertIn('/assets/chart.mjs', html.text)
-            self.assertIn('NIFTY daily trend', html.text)
+            self.assertIn('Daily price trend', html.text)
             self.assertEqual(client.get('/assets/chart.css').status_code, 200)
             self.assertEqual(client.get('/assets/vendor/lightweight-charts-5.2.1.js').status_code, 200)
             self.assertEqual(client.get('/').status_code, 200)

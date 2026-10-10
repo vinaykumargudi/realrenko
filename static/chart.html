@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-default-symbol="NIFTY50">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101319">
-  <title>RealRenko · NIFTY 50 chart</title>
-  <link rel="stylesheet" href="/assets/chart.css?v=4">
+  <title>RealRenko · Stock & index charts</title>
+  <link rel="stylesheet" href="/assets/chart.css?v=6">
   <script src="/assets/vendor/lightweight-charts-5.2.1.js" defer></script>
-  <script type="module" src="/assets/chart.mjs?v=4"></script>
+  <script type="module" src="/assets/chart.mjs?v=6"></script>
 </head>
 <body>
 <div class="app" id="app">
@@ -22,9 +22,18 @@
     </div>
   </header>
 
+  <form class="instrument-toolbar" id="instrument-form">
+    <label for="symbol-input">NSE symbol <input id="symbol-input" list="symbol-list" value="NIFTY50" maxlength="33" required spellcheck="false" autocomplete="off" aria-label="NSE stock symbol"></label>
+    <datalist id="symbol-list"><option value="TCS"><option value="RELIANCE"><option value="INFY"><option value="HDFCBANK"><option value="SBIN"><option value="NIFTY50"></datalist>
+    <button class="button" type="submit">Load saved</button>
+    <label for="download-days">Recent <select id="download-days" aria-label="Download calendar days"><option value="28">28 days</option><option value="14">14 days</option><option value="7">7 days</option></select></label>
+    <button class="button export" type="button" id="download-button">↓ Download &amp; plot</button>
+    <span class="source-hint" id="download-hint">TCS or another NSE stock · recent 1-minute data</span>
+  </form>
   <form class="toolbar" id="controls">
-    <div class="symbol"><span class="symbol-icon">N</span><div><strong>NIFTY 50</strong><small>NSE · Index</small></div></div>
+    <div class="symbol"><span class="symbol-icon" id="symbol-icon">N</span><div><strong id="symbol-title">NIFTY 50</strong><small id="symbol-exchange">NSE · Index</small></div></div>
     <div class="toolbar-divider"></div>
+    <label class="view-picker">Bricks <select id="session-mode" aria-label="Remainder policy"><option value="threshold">Confirmed moves</option><option value="daily">Daily remainders</option></select></label>
     <label class="view-picker">Sizing <select id="sizing-mode" aria-label="Renko sizing method"><option value="percentage">Percentage</option><option value="atr">ATR · daily</option></select></label>
     <label class="percentage-label" id="percentage-control" for="percentage">Block size <span class="number-field"><input id="percentage" name="percentage" type="number" min="0.0001" max="99.9999" step="any" value="1" required><span>%</span></span></label>
     <div class="presets" id="percentage-presets" aria-label="Block size presets"><button type="button" data-percent="0.5">0.5%</button><button type="button" data-percent="1" class="active">1%</button><button type="button" data-percent="2">2%</button><button type="button" data-percent="3">3%</button></div>
@@ -38,7 +47,7 @@
   </form>
 
   <div class="study-toolbar">
-    <label class="view-picker">View <select id="view-mode" aria-label="Chart view"><option value="renko">Renko blocks</option><option value="daily-line">NIFTY daily trend</option><option value="daily-candles">NIFTY daily candles</option></select></label>
+    <label class="view-picker">View <select id="view-mode" aria-label="Chart view"><option value="renko">Renko blocks</option><option value="daily-line">Daily price trend</option><option value="daily-candles">Daily candles</option></select></label>
     <details class="indicator-menu" id="indicator-menu"><summary>ƒx <span>Indicators</span><b id="indicator-count">0</b></summary><form id="indicator-form" class="indicator-popover"><h3>Indicators</h3><p id="indicator-basis">Calculated on all Renko bricks, remainders and gaps.</p><div class="study-row"><label><input type="checkbox" id="supertrend-enabled"> Supertrend</label><div><label>ATR <input type="number" id="atr-period" min="1" max="500" value="10" required></label><label>Factor <input type="number" id="atr-factor" min="0.1" max="100" step="any" value="3" required></label></div></div><div class="study-row"><label><input type="checkbox" id="ema-enabled"> EMA</label><label>Length <input type="number" id="ema-period" min="1" max="1000" value="20" required></label></div><div class="study-row"><label><input type="checkbox" id="sma-enabled"> SMA</label><label>Length <input type="number" id="sma-period" min="1" max="1000" value="50" required></label></div><button class="button primary" type="submit">Apply indicators</button><span class="study-hint">Indicators use all loaded history for warm-up.</span></form></details>
     <span class="indicator-legend" id="indicator-legend"></span>
     <span class="window-return" id="window-return">Loaded window <b>—</b></span>
@@ -56,15 +65,15 @@
       <div class="rail-bottom"><button class="rail-button" id="help-button" title="Chart shortcuts" aria-label="Chart shortcuts">?</button></div>
     </nav>
 
-    <section class="chart-workspace" aria-label="NIFTY 50 Renko chart">
+    <section class="chart-workspace" aria-label="Renko chart">
       <div class="chart-header">
-        <div class="chart-title"><strong>NIFTY 50</strong><span class="dot-separator">·</span><span id="chart-mode">1% Renko</span><span class="mode-tag">Remainders + gaps</span></div>
+        <div class="chart-title"><strong id="chart-symbol">NIFTY 50</strong><span class="dot-separator">·</span><span id="chart-mode">1% Renko</span><span class="mode-tag">Confirmed moves</span></div>
         <div class="ohlc-strip" aria-label="Selected block prices"><span>O <b id="legend-open">—</b></span><span>H <b id="legend-high">—</b></span><span>L <b id="legend-low">—</b></span><span>C <b id="legend-close">—</b></span><b id="legend-move">—</b></div>
-        <div class="chart-toggles"><span title="Daily remainders and opening gaps are always shown">All moves shown</span><label title="New highs within the available source history"><input type="checkbox" id="show-ath" checked> <span class="ath-color">● ATH*</span></label><button type="button" class="text-button" id="log-button" aria-pressed="false" title="Switch logarithmic price scale">Log</button></div>
+        <div class="chart-toggles"><span id="move-policy-label">Small moves carry forward</span><label title="New highs within the available source history"><input type="checkbox" id="show-ath" checked> <span class="ath-color">● ATH*</span></label><button type="button" class="text-button" id="log-button" aria-pressed="false" title="Switch logarithmic price scale">Log</button></div>
       </div>
       <div class="chart-stage" id="chart-stage">
-        <div id="chart" role="img" aria-label="Interactive NIFTY 50 Renko bricks. Scroll to zoom; drag to pan. Block values are available in the details panel."></div>
-        <div class="watermark" aria-hidden="true">NIFTY 50<small>REALRENKO</small></div>
+        <div id="chart" role="img" aria-label="Interactive Renko bricks. Scroll to zoom; drag to pan. Block values are available in the details panel."></div>
+        <div class="watermark" aria-hidden="true"><span id="watermark-symbol">NIFTY 50</span><small>REALRENKO</small></div>
         <div class="chart-overlay" id="chart-overlay" role="status" aria-live="polite"><div class="loading-ring" id="loading-ring"></div><strong id="overlay-title">Preparing your chart</strong><p id="overlay-description">Loading historical percentage blocks…</p><button class="button primary" id="retry-button" hidden>Try again</button></div>
         <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       </div>
@@ -88,13 +97,13 @@
       <p class="block-explanation" id="block-explanation">Click a block to pin its details.</p><p class="breakout-detail" id="breakout-detail" hidden></p>
       <button class="text-button unpin-button" id="unpin-button" hidden>Unpin selection</button>
       <div class="panel-section"><div class="panel-heading">CHART OVERVIEW</div><dl class="detail-list"><div><dt>Normal blocks</dt><dd id="count-moves">—</dd></div><div><dt>Session gaps</dt><dd id="count-gaps">—</dd></div><div><dt>Unknown intervals</dt><dd id="count-unknown">—</dd></div><div><dt>Remainder bricks</dt><dd id="count-partials">—</dd></div></dl></div>
-      <div class="legend-list"><span><i class="green"></i>Up block</span><span><i class="red"></i>Down block</span><span><i class="blue"></i>Gap up</span><span><i class="purple"></i>Gap down</span><span><i class="amber"></i>Unknown interval</span><span><i class="green" style="opacity:.55"></i>Remainder (lighter)</span></div>
-      <div class="dataset-note"><strong>Historical dataset</strong><p id="dataset-dates">Loading available dates…</p><p id="ath-history-note">*ATH compares with the available source history.</p><a id="json-link" href="/bars?percentage=1" target="_blank" rel="noopener">Open chart data ↗</a></div>
+      <div class="legend-list"><span><i class="green"></i>Up block</span><span><i class="red"></i>Down block</span><span><i class="blue"></i>Gap up</span><span><i class="purple"></i>Gap down</span><span><i class="amber"></i>Unknown interval</span><span><i class="green" style="opacity:.55"></i>Pre-gap remainder (lighter)</span></div>
+      <p class="pending-note" id="pending-note" hidden></p><div class="dataset-note"><strong id="source-provider">Historical dataset</strong><p id="source-note">Stocks and indices can have opening gaps.</p><p id="dataset-dates">Loading available dates…</p><p id="ath-history-note">*ATH compares with the available source history.</p><a id="json-link" href="/bars?percentage=1" target="_blank" rel="noopener">Open chart data ↗</a></div>
     </aside>
   </main>
   <footer class="footer"><span>RealRenko <span>·</span> Percentage / daily ATR bricks, full-size gaps</span><a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a><a href="/assets/vendor/NOTICE.lightweight-charts" target="_blank" rel="noopener">© 2025 TradingView, Inc.</a></footer>
 </div>
-<dialog id="help-dialog"><div class="dialog-header"><h2>Make the chart yours</h2><button id="close-help" class="icon-button" aria-label="Close shortcuts">×</button></div><dl class="shortcuts"><div><dt>Zoom</dt><dd>Mouse wheel / pinch · + / − keys</dd></div><div><dt>Move through history</dt><dd>Drag the chart · ← / → keys</dd></div><div><dt>Inspect a block</dt><dd>Hover · click to pin</dd></div><div><dt>Fit all blocks</dt><dd>Home</dd></div><div><dt>Latest 120 blocks</dt><dd>End</dd></div><div><dt>Add a price level</dt><dd>Choose —, then click a price</dd></div><div><dt>Cancel a tool / unpin</dt><dd>Escape</dd></div></dl><p>Full bricks use your exact percentage or prior daily ATR point size. ATR length is editable and is separate from the Supertrend ATR setting. Gap bars retain their full size. Daily remainders are always shown as lighter bricks. Flat sessions use a horizontal tick. Bricks touch, with no empty overnight or weekend slots. Gold ATH* dots mark new highs within available source history; select a brick for the original price and breakout time.</p></dialog>
+<dialog id="help-dialog"><div class="dialog-header"><h2>Make the chart yours</h2><button id="close-help" class="icon-button" aria-label="Close shortcuts">×</button></div><dl class="shortcuts"><div><dt>Zoom</dt><dd>Mouse wheel / pinch · + / − keys</dd></div><div><dt>Move through history</dt><dd>Drag the chart · ← / → keys</dd></div><div><dt>Inspect a block</dt><dd>Hover · click to pin</dd></div><div><dt>Fit all blocks</dt><dd>Home</dd></div><div><dt>Latest 120 blocks</dt><dd>End</dd></div><div><dt>Add a price level</dt><dd>Choose —, then click a price</dd></div><div><dt>Cancel a tool / unpin</dt><dd>Escape</dd></div></dl><p>Full bricks use your exact percentage or prior daily ATR point size. ATR length is editable and is separate from the Supertrend ATR setting. Confirmed moves carries unfinished moves across sessions. An opening gap smaller than the threshold can complete a normal brick at the open. A larger gap retains its actual size, preceded by any unfinished remainder. No ordinary day-end partial is drawn. Daily remainders restores the previous view. Bricks touch, with no empty overnight or weekend slots. Gold ATH* dots mark new highs within available source history; select a brick for the original price and breakout time.</p></dialog>
 <noscript>This chart needs JavaScript. You can still read the <a href="/bars?percentage=1">1% block data</a>.</noscript>
 </body>
 </html>

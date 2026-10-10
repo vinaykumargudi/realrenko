@@ -7,3 +7,4 @@ bars.json
 bars.html
 *.egg-info/
 node_modules
+data/

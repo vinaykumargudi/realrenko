@@ -55,12 +55,21 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
   for(const [k,v] of Object.entries({chart:'#101319',text:'#e6eaf2',muted:'#8993a7',border:'#282e3b',green:'#26c59c',red:'#ee6072',blue:'#629aff',purple:'#b490ff',amber:'#edac55',accent:'#628bff'})) w.document.documentElement.style.setProperty(`--${k}`,v);
   const {chart,library}=engine();w.LightweightCharts=library;
   const requests=[];
-  globalThis.fetch=async url=>{
+  let failDownload=false;
+  globalThis.fetch=async (url,options={})=>{
     requests.push(String(url));const q=new URL(String(url),'http://localhost').searchParams;
     const period=Number(q.get('atr_period'));
+    if(String(url).startsWith('/download')) {
+      assert.equal(options.method,'POST');
+      return failDownload ? {ok:false,status:502,json:async()=>({detail:'Provider temporarily unavailable'})}
+        : {ok:true,json:async()=>({metadata:{downloaded_minutes:6495}})};
+    }
     const data=String(url).startsWith('/history')?payload(daily,'observed_daily_price')
       :q.get('sizing')==='atr'?payload(atrRows(period),'prior_daily_atr_close'):payload(renko,'exact_percentage_close');
-    if(q.get('sizing')==='atr')Object.assign(data.metadata,{sizing:'atr',atr_period:period,percentage:null});
+    if(q.get('sizing')==='atr')Object.assign(data.metadata,{sizing:'atr',atr_period:period,percentage:null,last_atr_points:period});
+    Object.assign(data.metadata,{symbol:q.get('symbol')||'NIFTY50',session_mode:q.get('session_mode')||'threshold'});
+    if(q.get('symbol')==='TCS') Object.assign(data.metadata,{source_provider:'Yahoo Finance (unofficial chart endpoint)',downloaded_minutes:6495,
+      pending_move:{open:102,last_price:103,move_pct:100/102,source_minutes:2},downloaded_at:'2026-10-10T12:00:00Z'});
     return {ok:true,json:async()=>data};
   };
   const $=id=>w.document.getElementById(id);
@@ -72,6 +81,11 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
     assert.equal(chart.series[0].type,'renko');assert.equal(chart.series[0].data.length,4);
     assert.equal($('count-partials').textContent,'1');
     assert.ok(requests[0].includes('include_partials=true'));
+    assert.ok(requests[0].includes('session_mode=threshold'));
+    assert.equal($('session-mode').value,'threshold');
+    $('session-mode').value='daily';change('session-mode');await settle();
+    assert.ok(requests.at(-1).includes('session_mode=daily'));
+    $('session-mode').value='threshold';change('session-mode');await settle();
     for(let i=1;i<chart.series[0].data.length;i++) assert.equal(chart.series[0].data[i-1].close,chart.series[0].data[i].open);
     assert.equal(chart.options.handleScroll.pressedMouseMove,true);
     assert.equal(chart.options.handleScroll.vertTouchDrag,true);
@@ -146,5 +160,24 @@ test('Chart controls, data views, indicators, pinning and pan configuration are 
     $('clear-levels-button').click();assert.equal(chart.series[0].lines.length,0);
     $('start-date').value='2010-01-01';$('end-date').value='2010-12-31';submit('controls');await settle();
     assert.equal($('chart-overlay').hidden,false);assert.equal($('overlay-title').textContent,'No prices in this window');
+    // Switching instruments clears the former date window and user price levels.
+    $('symbol-input').value='TCS.NS';submit('instrument-form');await settle();
+    assert.equal($('symbol-title').textContent,'TCS');assert.equal($('chart-symbol').textContent,'TCS');
+    assert.equal($('watermark-symbol').textContent,'TCS');assert.equal($('start-date').value,'');
+    assert.ok(requests.at(-1).includes('symbol=TCS'));assert.ok(w.location.search.includes('symbol=TCS'));
+    assert.ok($('json-link').href.includes('symbol=TCS'));assert.equal(chart.series[0].lines.length,0);
+    assert.equal(w.document.querySelector('[data-range="2015-2020"]').hidden,true);
+    $('view-mode').value='renko';change('view-mode');await settle();
+    assert.equal($('pending-note').hidden,false);assert.ok($('pending-note').textContent.includes('no brick drawn'));
+    $('download-button').click();await settle();await settle();
+    assert.ok(requests.some(x=>x.startsWith('/download?')&&x.includes('symbol=TCS')));
+    assert.equal($('symbol-input').disabled,false);assert.equal($('chart-overlay').hidden,true);
+    assert.ok($('download-hint').textContent.includes('6,495'));
+    failDownload=true;$('download-button').click();await settle();await settle();
+    assert.equal($('chart-overlay').hidden,false);assert.equal($('overlay-title').textContent,'Download unavailable');
+    assert.equal(chart.series.length,0);assert.equal($('download-button').disabled,false);
+    submit('instrument-form');await settle();assert.equal($('chart-overlay').hidden,true);
+    $('symbol-input').value='INFY';submit('instrument-form');await settle();
+    assert.equal($('chart-symbol').textContent,'INFY');assert.ok(requests.at(-1).includes('symbol=INFY'));
   } finally { await w.happyDOM.close(); }
 });

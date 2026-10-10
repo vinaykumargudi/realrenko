@@ -1,468 +1,224 @@
-# RealRenko — percentage / ATR bricks, daily remainders and full-size gaps
+# RealRenko — confirmed percentage / ATR bricks for NSE stocks and NIFTY
 
+## Version 2.5: stock downloads and threshold-only normal bricks
 
-## Version 2.3: ATR sizing and new-high markers
+Download **TCS, RELIANCE, INFY, HDFCBANK, M&M**, or another NSE equity supported
+by Yahoo Finance. The symbol accepts an optional `.NS` suffix. Stock prices
+can have opening gaps too; selecting a stock does not remove them.
 
-Choose **Sizing → ATR · daily**, then select **7**, **10**, **14**, or enter a
-custom positive whole-number length and press **Apply**. Percentage sizing
-remains available. The **ATR length in the top toolbar sizes Renko bricks**;
-it is separate from the ATR length inside the Supertrend indicator settings.
+The default **Confirmed moves** view carries unfinished movement across minutes
+and sessions. It draws a normal brick only when the selected threshold is met.
+The earlier **Daily remainders** view is still available in the Bricks selector.
 
-- Chart: http://127.0.0.1:8000/chart?sizing=atr&atr_period=14
-- API: http://127.0.0.1:8000/bars?sizing=atr&atr_period=7
-- Custom example: http://127.0.0.1:8000/chart?sizing=atr&atr_period=21
+### Run TCS
 
-### How ATR sets the brick size
-
-The period counts **daily candles**, not minute candles or Renko bricks.
-The current implementation uses **1 × prior daily Wilder ATR** as the full
-brick's point size for the entire next observed session. For example, a
-120-point ATR gives full bricks of +120 or −120 points; their percentages will
-vary with price. Reversals still use one brick. Daily remainders and full-size
-opening gaps remain visible, using the same session reset as percentage mode.
-
-For each eligible daily candle:
-
-```text
-TR = max(high − low, abs(high − previous close), abs(low − previous close))
-first TR = high − low
-initial ATR = mean(first N true ranges)
-next ATR = (previous ATR × (N − 1) + new TR) / N
-```
-
-[ATR formula and RMA reference](https://www.tradingview.com/support/solutions/43000501823-average-true-range-atr/).
-We aggregate actual minute OHLC into daily OHLC, then use only earlier daily
-candles for sizing. A session's own range never changes its brick size, and a
-later daily ATR never resizes older bricks. Changing the display dates happens
-after conversion and keeps the prior history used for warm-up.
-
-A daily candle is eligible only if all **375 minutes, 09:15–15:29 IST**, are
-observed. Incomplete or nonstandard prior sessions are skipped for ATR and
-listed in `atr_skipped_prior_sessions`; the previous ATR carries forward. The
-next eligible true range references the last eligible close, so a gap across
-excluded dates is included in that range. No exchange calendar is inferred.
-This explicit convention can differ from another charting platform's ATR Renko.
-
-Until N eligible prior daily candles exist, **warm-up remainders and gaps still
-appear**, but no full ATR bricks are invented. Zero ATR behaves the same way
-until a positive prior ATR exists. The inspector shows **Target brick size**
-and **ATR through** for each selected brick. ATR mode returns:
-
-- `metadata.sizing = "atr"`, `mode = "prior_daily_atr_close"`, `percentage = null`.
-- `atr_period`, `atr_timeframe = "1D"`, `atr_smoothing` and the sizing policy.
-- Per brick: `brick_size_points`, `atr_value`, `atr_as_of`, and
-  `atr_status` (`ready`, `warmup`, or `zero_atr`).
-- `move_pct` remains the actual movement divided by that brick's own open.
-
-Python and CLI:
-
-```python
-from nifty_bars import convert_minutes, read_minutes
-result = convert_minutes(read_minutes("nifty50_candlestick_data.csv"),
-                         sizing="atr", atr_period=14)
-```
+Python 3.10+, from the repository directory:
 
 ```bash
-python nifty_bars.py --sizing atr --atr-period 7 --output atr7.json --html atr7.html
-```
-
-### Spot a breakout to a new history high
-
-The **● ATH*** toggle is on by default. Gold dots mark bricks/daily candles
-whose source observations exceeded every earlier observed source high. The
-**ATH*** text appears at the start of a consecutive run of marked bricks to
-reduce clutter. Select the brick to see the prior record, new source high,
-first breakout time and number of new-high observations grouped into it.
-Standalone `--html` exports include equivalent gold markers.
-
-**ATH* means a record within the available CSV history, which starts on
-9 January 2015. It is not a verified lifetime all-time high.** The first source
-high seeds the baseline without a breakout marker; equal highs do not qualify.
-The rule is a strict break of a **high**, not a close-confirmed breakout. A wick
-can set a new record even if the minute closes lower. Renko OHLC stays unchanged.
-
-The comparison is calculated over all source history before date filtering,
-using original minute highs, not synthetic brick highs. A gap open beyond the
-record marks the gap itself at its observed opening time. Intraminute highs
-are known only at minute completion. Several new highs can belong to one brick;
-extra bricks from the same confirming minute do not duplicate the event.
-A record made before a full brick forms is attached to that brick once it
-forms, or to its remainder. Its original event time remains in the inspector.
-These historical markers are annotations, not real-time trade alerts.
-
-API `ath_breakout` is null or contains `previous_high`, `high`, `first_at`,
-`last_at`, `known_at` and `count`. Metadata records `ath_reference`,
-`ath_history_start`, `ath_latest_high` and `ath_breakout_observations`.
-
-## Version 2.2: always show the daily remainder
-
-The Renko chart now draws touching, wick-free rectangles. It always includes
-**full percentage bricks → daily remainder → next opening gap**, so each
-brick's close equals the next brick's open. Weekends and overnight intervals
-have no empty time slots. Remainders are lighter green/red bricks, gap ups are
-blue, gap downs are purple, and a flat session is a horizontal tick at its
-unchanged price. A large gap remains one large brick.
-
-For a **3%** setting, assuming a steady move from an opening price of 100:
-
-| Day's close | Day's bricks | Next open at +1% | Gap brick |
-| --- | --- | --- | --- |
-| 102 (+2%) | 100 → 102 remainder | 103.02 | 102 → 103.02 |
-| 104 (+4%) | 100 → 103 full brick; 103 → 104 remainder | 105.04 | 104 → 105.04 |
-| 96 (−4%) | 100 → 97 full brick; 97 → 96 remainder | 96.96 | 96 → 96.96 |
-
-Every percentage is measured from that brick's own open. The 103 → 104
-remainder is **1 price point**, or **0.9708737864%**, and is not rounded to 1%.
-This preserves both the exact 3% full bricks and actual closing prices. A day
-with reversals can create additional full bricks along its minute-close path;
-the examples above describe steady moves, not a rule based only on daily net change.
-
-Python, `/bars`, and CLI exports include remainders by default. The chart
-always includes gaps and remainders, including when opening an older URL with
-`include_partials=false` or `gaps=false`. Explicit sparse API/CLI exports remain
-available through `include_partials=false` / `--no-include-partials`; those
-exports deliberately omit price connections. `kind="partial"` remains the API
-field for a remainder, for compatibility.
-
-## Interactive chart workspace
-
-Open **http://127.0.0.1:8000/chart** after starting the existing API. The new UI
-uses the locally bundled TradingView Lightweight Charts 5.2.1 library. There is
-no CDN request, paid charting subscription, or frontend build step.
-
-- **Drag left/right or up/down** to move the chart. Dragging turns off price
-  autoscaling so vertical movement is possible. **Auto** restores price fitting.
-- Scroll/pinch to zoom, drag either axis to scale, or use +/− controls and keys.
-- Use **Latest blocks** for a readable recent window, **Fit** for all loaded
-  bars, and **Log** for a logarithmic price scale. Home fits; End shows the latest.
-- Hover for OHLC and timestamps, click a block to pin it, or use the inspector.
-- Add horizontal price levels with the — tool; clear them with the erase button.
-- Percentage presets (including 3%), date inputs, light/dark mode,
-  fullscreen and PNG export are included. Fullscreen availability depends on
-  the browser. PNG export captures the chart canvas.
-
-### See NIFTY's actual long-term movement
-
-The **View** selector offers **Renko blocks**, **NIFTY daily trend**, and
-**NIFTY daily candles**. **Renko blocks** is the default. The **2015–20**
-shortcut keeps your selected view and changes only the date window. To see
-larger individual bricks, zoom in; **Latest blocks** starts with a readable
-recent window. Daily price views remain available through the View selector.
-
-The daily views use real daily OHLC aggregated from the provided minute data
-through `/history`, not percentage-block geometry. Prices are not rebased to
-100 or normalized. In the source window from 9 January 2015 to 31 December
-2020, first observed open is 8,285.45 and last observed close is 13,967.00.
-See `examples/daily_price_validation.json` for the full-source check. These are
-observed source prices, not official NSE daily settlement/closing calculations.
-
-The **Loaded window** change is first displayed open to last displayed close;
-it is neither a trading return nor the change of only the zoomed viewport.
-Daily candles with incomplete/nonstandard minute coverage are identified in
-the inspector. The supplied history ends in March 2024, so this is historical
-charting rather than a live market feed.
-
-### Indicators
-
-Open **ƒx Indicators** to enable:
-
-- **Supertrend**: adjustable ATR length (default 10) and factor (default 3),
-  using Wilder ATR and trailing upper/lower bands.
-- **EMA**: adjustable length (default 20), with a first-close recursive seed.
-- **SMA**: adjustable length (default 50), with the normal full-window warm-up.
-
-Daily views calculate on actual daily OHLC. Renko indicators calculate on all
-full bricks, daily remainders, and gap bars, including the current unfinished
-remainder. That last remainder and its indicator values can change when more
-minutes arrive. A period counts bricks, not minutes or days. The controls
-identify this input. These are indicators on this custom Renko variant; values
-can differ from a standard Renko platform or a different data feed, candle
-type, history length or initialization.
-
-All available earlier history is loaded for indicator warm-up before applying
-the date window; panning/zooming never restarts an indicator. Insufficient ATR
-or SMA warm-up stays blank rather than displaying invented values. Supertrend
-is shown as a stepped line, colored green for bullish and red for bearish.
-
-These are built-in JavaScript implementations of public indicator formulas.
-There is no Pine Script interpreter or automatic TradingView community-script
-import. Formula references: [Supertrend](https://www.tradingview.com/support/solutions/43000634738-supertrend/)
-and [ATR / RMA](https://www.tradingview.com/support/solutions/43000734653-how-are-adr-and-atr-calculated/).
-
-### UI implementation and checks
-
-`static/chart.html`, `chart.css`, and `chart.mjs` provide the interface.
-`chart-data.mjs` preserves original OHLC and assigns unique, equally spaced
-internal coordinates to each displayed bar. Multiple bricks confirmed in one
-minute remain separate; labels and crosshair dates map back to real IST times.
-Internal coordinates are never presented as market timestamps.
-
-`static/renko-series.mjs` implements full-width brick rendering using the
-[custom series API](https://tradingview.github.io/lightweight-charts/docs/5.0/plugins/custom_series).
-Rectangles share horizontal boundaries; their height comes from the exact
-open/close price coordinates. A minimum one-pixel stroke keeps flat or tiny
-bricks visible without changing stored prices. There are no source wicks.
-
-`static/indicators.mjs` holds the testable indicator calculations.
-The bundled chart library, Apache-2.0 license, and TradingView copyright notice
-are in `static/vendor/`. Required attribution remains visible in the UI.
-
-Python checks (30 tests): `python -m unittest -v` after installing
-`requirements-dev.txt`. Optional frontend developer checks (Node 20+):
-
-```bash
-npm ci
-npm test
-```
-
-Nine frontend tests cover hand-calculated indicators, no-lookahead behavior,
-actual chart OHLC, duplicate-time bricks, historical price levels, touching
-rectangle geometry at different pixel ratios, source-high markers, custom ATR
-controls, and DOM control interactions. The DOM smoke test uses a stubbed chart engine. A real
-browser/canvas visual and gesture check was not available in the build
-environment; the test is not a substitute for that check.
-
-`/chart` serves the new interface. `make_chart()` and CLI `--html` continue to
-produce the older, standalone Plotly export for compatibility.
-
-
-Convert NIFTY 50 minute history into fixed-percentage Renko-style blocks, return
-OHLC through FastAPI, and plot overnight gaps as one full-size bar.
-
-## Version 2 fixes normal-bar overshoots
-
-**`percentage=1` now makes every completed normal block exactly +1% or -1%
-relative to that block's open.** The previous implementation treated 1% as a
-minimum and allowed normal 1.3%, 1.4%, and 2.18% bars. That behavior was wrong
-for the requested chart and has been removed.
-
-Excess movement carries into subsequent blocks within the session. Gap bars
-keep their complete size. Daily and final remainders are shown by default.
-
-**OHLC semantics changed:** normal blocks now have calculated, wick-free OHLC.
-Actual source highs/lows remain separately available in `observed_ohlc` and
-`trigger_minute`. Minute OHLC cannot establish the true price path or crossing
-time for each synthetic block. This is a close-based projection, not tick
-reconstruction, and calculated boundaries are not promised execution prices.
-
-## Run or update
-
-Python 3.10+:
-
-```bash
-git clone https://github.com/vinaykumargudi/realrenko.git
-cd realrenko
-python3 -m venv .venv
-source .venv/bin/activate
 python -m pip install -r requirements.txt
+python nifty_bars.py --symbol TCS --download --days 28 --serve
+```
+
+Open **http://127.0.0.1:8000/chart?symbol=TCS&percentage=2**.
+For an existing checkout, stop the server, run `git pull --ff-only`, then restart.
+
+In the chart, enter a symbol and press **Download & plot**. **Load saved** opens
+its cached snapshot without contacting the provider. Pan, zoom, crosshair,
+log scale, Supertrend, EMA, SMA, ATR sizing and source-high markers all work
+with the selected instrument. **Daily price trend** / **Daily candles** show
+observed daily prices rather than synthetic Renko boundaries. The interface
+uses vendored TradingView Lightweight Charts; it is not TradingView's full app.
+
+To load the original user-supplied NIFTY history:
+
+```bash
 python nifty_bars.py --download --serve
 ```
 
-If already installed, stop the running server with Ctrl+C, then:
+Select `NIFTY50` and **Load saved**. Its original source is
+[sandeepkapri/Nifty50-Minute-Data](https://github.com/sandeepkapri/Nifty50-Minute-Data).
 
-```bash
-git pull --ff-only
-python nifty_bars.py --serve
-```
+### The exact percentage rule
 
-Restarting matters: an existing process still holds the previous code and
-cached results. Current JSON identifies itself with `algorithm_version = "2.3.0"`.
-Percentage mode remains `metadata.mode = "exact_percentage_close"`; ATR mode
-is `"prior_daily_atr_close"`.
-
-- JSON: http://127.0.0.1:8000/bars?percentage=1
-- Chart: http://127.0.0.1:8000/chart?percentage=1&start=2020-03-01&end=2020-03-31
-- Continuous 3% Renko: http://127.0.0.1:8000/chart?percentage=3
-- API docs: http://127.0.0.1:8000/docs
-
-`1` means 1%, `0.5` means 0.5%; `1%` is also accepted (encode `%` as `%25`
-in URLs). `start` and `end` are inclusive IST dates, `YYYY-MM-DD`. Conversion
-precedes date filtering, so changing the window does not change block geometry.
-
-The service reads the local downloaded CSV and caches four sizing/period/file
-versions per process. It does not download on each request. To use another
-local CSV, pass `--csv PATH` or set `NIFTY_CSV` when running
-`uvicorn main:app --host 127.0.0.1 --port 8000`. API defaults to localhost.
-
-## Percentage calculation and leftover movement
-
-Let `A` be the current block anchor and `p` the requested percentage:
+For anchor `A` and percentage `p` (`2` means 2%):
 
 ```python
 upper = A * (1 + p / 100)
 lower = A * (1 - p / 100)
 ```
 
-The first anchor is the observed session open. For each **completed minute
-close**, emit every crossed threshold. After each normal block, move the anchor
-to that block's calculated close. Keep that anchor for the next minute; do not
-reset it to the latest observed price. Reversals need one block, not the
-traditional two-block Renko reversal convention.
+Completed minute closes confirm normal bricks. Emit **every** crossed threshold,
+then carry the remaining displacement from the last brick boundary. Each
+normal body is exactly `+p%` or `-p%` of its **own open**, using Decimal before
+JSON serialization. Bricks compound; two upward 2% bricks span 4.04%, not 4%.
+Reversals use one brick, rather than traditional two-brick Renko reversal.
 
-Examples for `p=1`, starting at 100:
+At a session boundary, compare the opening change with the **previous observed
+close**, not with the unfinished brick's anchor:
 
-| Observed close | Completed normal blocks | Remainder |
-| --- | --- | --- |
-| 101.3 | 100 → 101 | 101 → 101.3, pending |
-| 101.4 | 100 → 101 | 101 → 101.4, pending |
-| 102.18 | 100 → 101 → 102.01 | 102.01 → 102.18, pending |
-| 97.82 | 100 → 99 → 98.01 | 98.01 → 97.82, pending |
+- **Below the threshold:** treat the observed open as ordinary movement toward
+  the pending brick. If it completes the threshold, confirm a normal brick at
+  the open. There is **no separate gap label or gap bar**.
+- **At or above the threshold:** print any preceding nonzero unfinished move
+  as a **pre-gap remainder**, then one bar preserving the complete opening gap.
+  Restart the anchor at the new observed open. Never subtract the preceding
+  remainder from the actual gap or round a large gap to the brick percentage.
+- No ordinary session-end, flat-session or final partial is plotted. Unfinished
+  movement appears in the inspector and `metadata.pending_move`, outside the
+  bar series. It is excluded from chart indicators until a brick is confirmed.
 
-Percentages **compound**: two +1% blocks total +2.01%. They are not two
-fixed one-point blocks. If a close reaches 103.2 from 100, the calculated closes
-are 101, 102.01, and 103.0301, leaving the remainder pending.
+Examples at **2%**, starting from anchor 100:
 
-For each completed normal block:
+| Observed prices | Plotted result |
+| --- | --- |
+| Close 101 | No brick; 1% remains pending |
+| Close 101, next open 103 | One **normal** 100 → 102 brick at the open; 1 price unit remains pending |
+| Close 101, next open 103.02 | A 100 → 101 remainder, then an exact 2% gap 101 → 103.02 |
+| Close 101, next open 104.03 | A 100 → 101 remainder, then the full **3%** gap 101 → 104.03 |
+| Close 99, next open 98 | One normal downward 100 → 98 brick |
+| Minute closes at 107 | Three normal bricks: 100 → 102 → 104.04 → 106.1208; remainder stays pending |
 
-- Open = previous anchor.
-- Close = exactly `open * (1 ± p/100)`.
-- High = `max(open, close)`; low = `min(open, close)`.
-- Both the body percentage and high-low percentage equal `p` (within numeric
-  precision). Raw candle wicks are never attached to these plotted blocks.
-- Decimal arithmetic is used for thresholds; JSON prices are floats. Do not
-  round prices before plotting or recalculate thresholds from rounded values.
+The 101 → 103 opening change is ~1.9802%; it therefore joins the normal move.
+An opening-confirmed brick uses only the observed open and prior history; the
+current minute's later high and close cannot affect it. `known_at` records the
+actual confirmation time. Several bricks from one observation can share that
+time. The calculated brick boundary is not a promised trade execution price.
 
-A source minute whose high crosses a level but whose close does not cross it
-will not confirm a full percentage brick. Its closing displacement stays in the
-remainder, which is emitted at session/data boundaries and at end of input. Multiple blocks from one close share `known_at`; no
-intraminute crossing order or timestamps are fabricated.
+### Missing data and source limits
 
-## Gap handling and session reset
+`stock_data.py` requests genuine **1-minute** OHLC from Yahoo's unofficial chart
+endpoint. It uses requests of at most seven days within a recent **28-calendar-day**
+window. This respects the [limits documented in yfinance's own tests](https://github.com/ranaroussi/yfinance/blob/main/tests/test_price_repair.py).
+Older minute history and every NSE symbol are not guaranteed. There are no
+credentials, subscriptions or new production dependencies. Provider errors and
+rate limits are reported; the app never substitutes daily bars for minutes.
 
-At every session/data boundary, retain the last residual as a separately
-labelled partial, then reset the anchor to the next observed open.
+Downloads keep completed regular-session candles (09:15–15:29 Asia/Kolkata).
+Null OHLC rows, unfinished candles and outside-session quotes are excluded and
+counted. Invalid prices, wrong symbols, conflicting duplicates or wrong
+intervals reject the refresh. No forward filling, price rounding or local
+split/dividend adjustment is applied. Provider corporate actions are retained
+in metadata; splits and dividends can affect price comparisons.
 
-| Previous observed close | Next session open | One gap-bar OHLC | Move |
-| --- | --- | --- | --- |
-| 20,000 | 20,600 | O 20,000; H 20,600; L 20,000; C 20,600 | +3% |
-| 20,000 | 19,400 | O 20,000; H 20,000; L 19,400; C 19,400 | -3% |
+A gap is classified `session_gap` only with observed 15:29 → 09:15 endpoints.
+Otherwise the unobserved interval is **not a verified overnight gap**. Its
+endpoint movement can complete ordinary bricks below the threshold; the bar's
+`confirmation` identifies an opening after missing data. At/above the threshold
+it becomes a `data_gap` bridge. No traded path through missing minutes is claimed.
+Metadata counts absorbed unknown intervals and flags incomplete sessions.
 
-Gaps are never split into 1% blocks. Their reference is the **actual previous
-observed close**, not the last calculated block boundary. Normal blocks after
-a gap restart at the new session open. Small nonzero overnight gaps are also
-preserved; zero gaps are omitted.
+Each stock has a separate immutable CSV snapshot under ignored `data/`.
+An atomic manifest publishes the download only after all chunks validate.
+Refresh replaces the recent window; it does not append across possible provider
+adjustments. Old snapshots remain on disk, and a failed refresh leaves the
+previous manifest intact. The app checks the snapshot hash before reading it.
+The source, exact downloaded dates, skipped records and SHA-256 are recorded.
 
-`session_gap` requires normal-session endpoint minute labels 15:29 and 09:15.
-Missing intraday intervals or nonstandard session endpoints are `data_gap`:
-their endpoint displacement is shown, but the intervening path is unknown.
-These gap bodies do not claim trades occurred at intermediate prices.
+### Actual TCS validation
 
-**Session reset remains enabled.** Remainders carry between minutes within a
-session, but do not carry across overnight or missing-data boundaries. They
-are emitted as remainder bricks before the next gap and are always displayed
-in the chart. If the entire session stays below the threshold, its net closing
-move still appears as a remainder. A flat session retains a zero-height record.
-If the last source minute already ended exactly at a full brick boundary, no
-extra zero-height remainder is needed. Missing data is still identified as an
-unknown-interval bridge; the converter does not invent its intraminute path.
+Downloaded on **10 October 2026**, the snapshot contained **6,495 valid minutes**
+from **15 September to 9 October 2026**, across 18 observed sessions. Yahoo
+returned 255 null OHLC rows, including missing session-closing minutes. These
+were not filled. All 17 inter-session endpoint changes were below 2%, so they
+were incorporated into normal movement, not plotted as gap bars.
 
-## Output and plotting
+The 2% result has **12 completed normal bricks**. The final observed price is
+2,156.00, with an unfinished -1.30345% displacement from anchor 2,184.473539.
+That unfinished move is not a bar. Exact brick bodies, connected boundaries,
+source-minute accounting and source-high event accounting were checked.
+This audit verifies conversion of the downloaded data, not its independent
+accuracy against exchange records. See [audit JSON](examples/tcs_2pct_validation.json).
 
-| Kind | Meaning | Color |
-| --- | --- | --- |
-| `move` | Exact-percentage completed normal block | Green/red |
-| `session_gap` | Unsplit normal-session endpoint gap | Blue/purple |
-| `data_gap` | Unsplit unknown-interval endpoint bridge | Amber |
-| `partial` | Daily/final remainder, always shown in the chart | Lighter green/red (flat: grey) |
+![TCS 2% confirmed Renko snapshot](examples/tcs_2pct.png)
 
-The x-axis uses equal positions for returned blocks; elapsed time varies.
-Hover labels include OHLC, percentage, timestamps and bar type. Every normal
-block's actual plotted OHLC matches the requested percentage, not just its label.
+### ATR sizing and indicators
 
-Key fields:
+Choose **Sizing → ATR · daily**, with length **7, 10, 14 or any positive integer**.
+ATR uses actual daily source OHLC, not synthetic brick prices:
 
-- `open`, `high`, `low`, `close`: **calculated block geometry**.
-- `move_pct`, `range_pct`: block movement/range as percentages of its open.
-- `synthetic_ohlc=true`: all returned block geometries are synthetic.
-- `synthetic_bridge=true`: only session/data-gap bridges, not normal blocks.
-- `observed_ohlc`: separately aggregated actual OHLC for newly consumed input
-  minutes; null for additional blocks generated by the same observation.
-  These observations are audit context, not an intrabrick trading path.
-- `trigger_minute`: the actual minute OHLC that confirmed a normal block or
-  last updated a partial; can repeat on multiple blocks. Null for gap bridges.
-- `source_minutes`: newly consumed minute count. Extra blocks from the same
-  minute have zero. Counts sum to all input minutes **only with partials included**.
-- `start`, `end`, `known_at`: source/confirmation bounds. Normal blocks are
-  known only at minute end; extra blocks from the same close can have equal
-  start/end bounds. Gap endpoints are known at the new open.
-- `finalized=false`: final `end_of_input` partial, which can change on more input.
+```text
+TR = max(H − L, abs(H − previous eligible close), abs(L − previous eligible close))
+first TR = H − L
+seed ATR = mean(first N eligible daily TRs)
+next ATR = (previous ATR × (N − 1) + TR) / N
+```
 
-Pass completed input minutes only. This is a batch converter, without persisted
-live-stream/chunk continuation state. `metadata.bar_counts` counts all types,
-including remainders; `returned_bar_counts` describes the actual response.
+Only fully observed 375-minute regular sessions are eligible. The prior daily
+ATR becomes the next session's fixed point size; the current session cannot
+resize earlier bricks. Incomplete days are skipped. Threshold mode carries
+pending movement during warm-up; no invented full ATR bricks are drawn.
 
-## Source data and explicit cleaning
+**This TCS snapshot has no complete sessions, so daily ATR sizing cannot warm
+up on it.** The chart says so. Use a more complete minute CSV for reliable
+ATR sizing; selecting 7 instead of 14 does not repair missing source minutes.
+The earlier NIFTY source does have eligible daily history. A custom period
+still requires that many eligible prior daily candles.
 
-[Source CSV](https://raw.githubusercontent.com/sandeepkapri/Nifty50-Minute-Data/refs/heads/main/nifty50_candlestick_data.csv)
-is a third-party historical file, not a live feed or independently verified
-tick history. The tested snapshot has 852,087 raw rows from 9 January 2015,
-09:15 IST to 27 March 2024, 12:59 IST, across 2,282 observed dates.
+Supertrend's ATR setting is separate: it uses the displayed bar sequence
+(bricks/remainders/gap bridges, or observed daily OHLC in a daily view). EMA and
+SMA also use that selected series. Indicators warm up before date filtering.
+Gold **ATH*** markers mean a new **source-history high**, not a verified lifetime
+high. The first source high seeds the baseline; equal highs do not qualify.
+Pending source-high observations are attached when a brick is confirmed.
 
-- Parse dates as `DD-MM-YYYY`; assume minute-start IST timestamp labels.
-- Floor 10,693 nonzero-second labels to the minute, reporting their count.
-- Four minute buckets contain two raw rows. Default cleaning uses chronological
-  first open / maximum high / minimum low / last close: 852,083 normalized
-  minutes. This assumption and affected timestamps appear in metadata.
-- Use `read_minutes(path, duplicate_policy="error")` to reject those collisions.
-  Raw duplicates, unsorted timestamps, invalid/nonpositive OHLC, NaN and infinity
-  always fail validation. There is no silent skipping or forward filling.
-- Missing intervals interrupt projection. Normal 375-minute session exceptions
-  are reported; no official exchange calendar is applied. Entire missing
-  sessions cannot be distinguished from holidays, and special sessions/halts
-  may be flagged as unknown boundaries.
-- Gap references use the last observed minute close, which can differ from the
-  official calculated daily closing index.
-
-## Python, files and verification
+### Python, CLI and API
 
 ```python
-from nifty_bars import convert_minutes, read_minutes
+from stock_data import download_stock
+from nifty_bars import read_minutes, convert_minutes
 
-result = convert_minutes(read_minutes("nifty50_candlestick_data.csv"), "1%")
-blocks = result["bars"]
-# Optional: pandas.DataFrame(blocks)
+path, source = download_stock("TCS", days=28)
+result = convert_minutes(read_minutes(path, expected_instrument="TCS"), percentage=2)
+result["metadata"].update(source)
 ```
 
 ```bash
-python nifty_bars.py --percentage 1 --output bars.json --html bars.html
-python nifty_bars.py --percentage 3 --output bars_3pct.json
+# Export from a saved download; --html produces the standalone Plotly export.
+python nifty_bars.py --symbol TCS --percentage 2 --output bars.json --html bars.html
+# A complete CSV can also be supplied directly in the schema below.
+python nifty_bars.py --csv my_tcs.csv --symbol TCS --sizing atr --atr-period 14
+# Retain the earlier daily partials / every opening gap behavior.
+python nifty_bars.py --symbol TCS --percentage 2 --session-mode daily
+```
+
+- `POST /download?symbol=TCS&days=28` — explicit download/refresh.
+- `GET /bars?symbol=TCS&percentage=2` — confirmed percentage bricks.
+- `GET /bars?symbol=TCS&sizing=atr&atr_period=14` — daily ATR sizing.
+- `GET /bars?symbol=TCS&percentage=2&session_mode=daily` — legacy daily remainders.
+- `GET /history?symbol=TCS` — observed daily OHLC.
+- `GET /docs` — interactive API documentation.
+
+`start` and `end` are inclusive IST date filters applied **after** conversion,
+not requests for older Yahoo history. `include_partials=false` hides explicit
+pre-gap remainders (or legacy daily remainders), so it can disconnect displayed
+prices; the chart always includes those explicit remainders. Pending metadata
+reports the end of the complete source, even when the displayed dates are filtered.
+
+CSV schema: `Instrument,Date,Time,Open,High,Low,Close`, with `DD-MM-YYYY` dates
+and `HH:MM:SS` IST minute-start times. A file must contain exactly one instrument
+and sorted raw timestamps. The original NIFTY file's nonzero-second labels are
+floored and collisions explicitly merged first/max/min/last, with counts reported.
+
+Run `uvicorn main:app --host 127.0.0.1 --port 8000` for the ASGI entry point.
+Optional environment variables: `NIFTY_CSV`, `STOCK_DATA_DIR`, `DEFAULT_SYMBOL`.
+Use `--data-dir` to select another stock cache directory in the CLI.
+
+### Validation
+
+```bash
 python -m pip install -r requirements-dev.txt
 python -m unittest -v
-python validate_source.py --csv nifty50_candlestick_data.csv --percentage 1 --output validation.json
+npm ci
+npm test
+python validate_stock_source.py --symbol TCS --percentage 2
+# Optional static preview (requires matplotlib):
+python validate_stock_source.py --symbol TCS --percentage 2 --plot examples/tcs_2pct.png
 ```
 
-Generated HTML works offline. CSV-to-JSON conversion requires only the standard
-library; plotting/API use the declared dependencies.
-
-Version 2 passed **17 tests**, including the reported +/−1.3%, 1.4%, and 2.18%
-overshoots, multiple blocks per minute, remainder carry, reversal, full gaps,
-partial filtering, API output, and actual OHLC passed to the chart.
-
-The full-source 1% audit checked **1,033 normal blocks**, 2,317 partials, and
-2,314 gap/unknown-interval bridges. Every normal block's actual returned body
-and range is 1%, with maximum floating-point error approximately 2.31e-14
-percentage points. All 852,083 normalized minutes are accounted for with
-partials included. See `examples/validation_1pct.json` for checks and source
-SHA-256. These counts are conversion results, not strategy returns.
-
-
-The version 2.2 **3%** source audit checked **47 full bricks**, **2,317
-remainders**, and **2,314 session/data-gap bridges**. All **4,677 adjacent
-price connections** match exactly in the returned JSON; all **852,083 source
-minutes** are accounted for. Full bricks remain exactly 3% to floating-point
-precision. See `examples/validation_3pct.json`. These are dataset validation
-counts, not performance results.
-
-
-For the ATR and record-high source audit, run:
-
-```bash
-python validate_atr_source.py --csv nifty50_candlestick_data.csv --output validation_atr_and_highs.json
-```
-
-This independently aggregates daily true ranges, checks 1% and ATR 7/10/14
-brick sizes against prior-session Wilder ATR, verifies price continuity and
-source-minute coverage, and matches every grouped breakout back to original
-source highs. Results are in `examples/validation_atr_and_highs.json`.
-The Python fixtures additionally cover custom periods, warm-up, zero ATR,
-incomplete sessions, API/CLI parity, and independence from future prices.
+The tests cover threshold boundary examples in both directions, opening-price
+confirmation without look-ahead, small gaps as normal movement, large gap
+preservation, missing intervals, CSV identity, download failures, symbol cache
+isolation, and chart controls. Frontend DOM tests stub the chart engine; renderer
+geometry tests inspect canvas calls, not physical browser gestures.
+The older full-source audit scripts deliberately retain `session_mode=daily`.
+[Version 2.3 documentation](docs/version-2.3.md) is archived for that policy.

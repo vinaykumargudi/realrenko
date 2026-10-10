@@ -6,7 +6,7 @@ from nifty_bars import HUNDRED, MINUTE, read_minutes
 from record_highs import RecordHighs, merge_breakouts
 
 
-def daily_history(path):
+def daily_history(path, *, expected_instrument=None):
     bars = []
     active = None
     first = last = None
@@ -33,7 +33,7 @@ def daily_history(path):
             'ath_breakout': active['breakout'],
         })
 
-    for candle in read_minutes(path):
+    for candle in read_minutes(path, expected_instrument=expected_instrument):
         first = first or candle
         last = candle
         minutes += 1
@@ -56,7 +56,7 @@ def daily_history(path):
         'source_minutes': minutes, 'source_rows': raw_rows, 'observed_sessions': len(bars),
         'bar_counts': dict(Counter(b['kind'] for b in bars)),
         **highs.metadata(first.timestamp),
-        'notes': ['Daily OHLC aggregates observed minute prices; it is not the official calculated closing index.',
+        'notes': ['Daily OHLC aggregates observed minute prices; it may differ from the official exchange closing price.',
                   'ATH markers use strictly higher observed minute highs across all supplied history, not verified lifetime highs or close-confirmed breakouts.',
                   'Incomplete/nonstandard sessions are flagged; missing prices are never forward filled.'],
     }, 'bars': bars}

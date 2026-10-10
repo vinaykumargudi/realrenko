@@ -17,6 +17,7 @@ import os
 import shutil
 import tempfile
 import urllib.request
+import urllib.parse
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -80,7 +81,7 @@ def download_csv(destination: Path = DEFAULT_CSV) -> Path:
     return destination
 
 
-def read_minutes(path: str | Path, duplicate_policy: str = "merge") -> Iterable[Candle]:
+def read_minutes(path: str | Path, duplicate_policy: str = "merge", *, expected_instrument: str | None = None) -> Iterable[Candle]:
     """DD-MM-YYYY, IST minute-start labels; normalize raw records by minute.
 
     This source has non-zero seconds and four minute collisions. Default merge
@@ -93,6 +94,7 @@ def read_minutes(path: str | Path, duplicate_policy: str = "merge") -> Iterable[
         raise ValueError("duplicate_policy must be 'merge' or 'error'")
     pending = None
     previous_raw = None
+    instrument = expected_instrument.upper().removesuffix(".NS") if expected_instrument else None
     with Path(path).open(encoding="utf-8-sig", newline="") as src:
         reader = csv.DictReader(src)
         required = {"Instrument", "Date", "Time", "Open", "High", "Low", "Close"}
@@ -100,8 +102,10 @@ def read_minutes(path: str | Path, duplicate_policy: str = "merge") -> Iterable[
             raise ValueError(f"Missing CSV columns: {sorted(required - set(reader.fieldnames or []))}")
         for line, row in enumerate(reader, 2):
             try:
-                if row["Instrument"].strip() != "Nifty50":
-                    raise ValueError("expected only Nifty50; do not mix instruments")
+                current_instrument = row["Instrument"].strip().upper().removesuffix(".NS")
+                if not current_instrument or (instrument is not None and current_instrument != instrument):
+                    raise ValueError(f"expected only {instrument or 'one instrument'}; do not mix instruments")
+                instrument = current_instrument
                 # Manual parsing is considerably faster than strptime for 850k rows.
                 d, m, y = map(int, row["Date"].split("-"))
                 hh, mm, ss = map(int, row["Time"].split(":"))
@@ -148,7 +152,7 @@ def validate_candle(c: Candle, previous: Candle | None) -> None:
 
 
 def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials=True,
-                    sizing="percentage", atr_period=14) -> dict:
+                    sizing="percentage", atr_period=14, session_mode="threshold") -> dict:
     """Build percentage or daily ATR close-based bricks, carrying excess forward.
 
     Normal OHLC is synthetic: O=anchor, C=anchor*(1 +/- p/100), H=max(O,C),
@@ -156,16 +160,19 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
     the final anchor for the next minute. Never round a 1.4% source move into
     a 1.4% normal brick. Actual source OHLC is separate audit metadata.
 
-    Session/missing-data gaps stay one unsplit endpoint bridge; reset the
-    anchor to the next observed open. Session/end-of-input residuals are
-    partials, included by default to connect every price boundary. Flat sessions
-    retain a zero-height partial. No intraminute price path is reconstructed.
+    Default threshold mode carries unfinished displacement across sessions.
+    Small boundary jumps can confirm full bricks at the observed open. Jumps
+    at least p% of the previous close (or current daily ATR points) print the
+    preceding nonzero remainder and one full-sized gap; missing intervals stay
+    labeled data_gap. Final unfinished movement is metadata, not a bar.
+    session_mode='daily' retains daily/end-of-input partials and all gap bars.
 
-    sizing='atr' uses the prior eligible daily Wilder ATR as a fixed point size
-    throughout each session. Warm-up/zero ATR days retain remainders and gaps
-    but cannot confirm full bricks. Current/future daily ranges never resize
-    earlier bricks. atr_period counts fully observed regular daily candles.
+    sizing='atr' uses prior eligible daily Wilder ATR fixed for each session.
+    Current/future daily ranges never resize earlier bricks. Warm-up/zero ATR
+    produces no full bricks; threshold mode keeps pending metadata only.
     """
+    if session_mode not in ("threshold", "daily"):
+        raise ValueError("session_mode must be threshold or daily")
     if sizing not in ("percentage", "atr"):
         raise ValueError("sizing must be 'percentage' or 'atr'")
     p = parse_percent(percentage) if sizing == "percentage" else None
@@ -183,6 +190,7 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
     pending_count = row_count = missing_intervals = normalized_labels = raw_rows = 0
     sessions = {}
     merged_buckets = []
+    absorbed_gaps = absorbed_unknown = 0
 
     def ohlc_dict(c):
         return {k: float(getattr(c, k)) for k in ("open", "high", "low", "close")}
@@ -227,6 +235,26 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
         pending_count = 0
         pending_breakout = None
 
+    def consume(price, end, known_at, trigger=None, confirmation="minute_close"):
+        nonlocal anchor, span_start, pending_count, observed, pending_breakout
+        while p is not None or brick_size is not None:
+            upper, lower = ((anchor * up_factor, anchor * down_factor) if p is not None
+                            else (anchor + brick_size, anchor - brick_size))
+            if upper == anchor or lower == anchor:
+                raise ValueError("brick size is too small for Decimal precision at this price")
+            if price >= upper:
+                target = upper
+            elif price <= lower:
+                target = lower
+            else:
+                break
+            emit("move", span_start, end, known_at, anchor, target, pending_count,
+                 ("exact_percentage_" if p is not None else "prior_daily_atr_") + confirmation + "_projection",
+                 observed, trigger, pending_breakout)
+            bars[-1].update({"confirmation": confirmation, "confirmation_price": float(price)})
+            anchor, span_start = target, end
+            pending_count, observed, pending_breakout = 0, None, None
+
     for c in candles:
         validate_candle(c, previous)
         row_count += 1
@@ -240,8 +268,8 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
         day_changed = previous is not None and c.timestamp.date() != previous.timestamp.date()
         missing = previous is not None and not day_changed and c.timestamp - previous.timestamp != MINUTE
         if day_changed or missing:
-            # Close the prior remainder using its original session's ATR.
-            flush("session_end" if day_changed else "missing_minutes", c.timestamp)
+            if session_mode == "daily":
+                flush("session_end" if day_changed else "missing_minutes", c.timestamp)
             missing_intervals += int(missing)
         if tracker is not None:
             tracker.observe(c)
@@ -254,10 +282,31 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             kind = "session_gap" if day_changed and normal_endpoints else "data_gap"
             reason = ("observed_session_close_to_open" if kind == "session_gap"
                       else "missing_minutes" if missing else "nonstandard_session_endpoints")
-            if kind == "data_gap" or c.open != previous.close:
-                gap_breakout = highs.observe(c.open, c.timestamp, c.timestamp)
-                emit(kind, previous.timestamp + MINUTE, c.timestamp, c.timestamp,
-                     previous.close, c.open, 0, reason, breakout=gap_breakout)
+            displacement = abs(c.open - previous.close)
+            large_gap = (displacement >= previous.close * p / HUNDRED if p is not None
+                         else brick_size is not None and displacement >= brick_size)
+            separate = session_mode == "daily" or large_gap
+            if separate:
+                if session_mode == "threshold":
+                    if anchor != previous.close:
+                        flush("before_large_gap", c.timestamp)
+                    # A flat pending span is not a brick; keep its observations
+                    # for the next brick (or pending metadata) without a zero bar.
+                    anchor, span_start = c.open, c.timestamp
+                if kind == "data_gap" or c.open != previous.close:
+                    gap_breakout = highs.observe(c.open, c.timestamp, c.timestamp)
+                    emit(kind, previous.timestamp + MINUTE, c.timestamp, c.timestamp,
+                         previous.close, c.open, 0, reason, breakout=gap_breakout)
+            else:
+                absorbed_gaps += int(kind == "session_gap" and displacement != 0)
+                absorbed_unknown += int(kind == "data_gap")
+                pending_breakout = merge_breakouts(pending_breakout, highs.observe(c.open, c.timestamp, c.timestamp))
+                if observed is not None:
+                    observed["high"] = max(observed["high"], c.open)
+                    observed["low"] = min(observed["low"], c.open)
+                    observed["close"] = c.open
+                consume(c.open, c.timestamp, c.timestamp,
+                        confirmation="session_open" if kind == "session_gap" else "observed_open_after_missing_data")
         if anchor is None:
             anchor, span_start = c.open, c.timestamp
         pending_count += 1
@@ -268,37 +317,28 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             observed["high"] = max(observed["high"], c.high)
             observed["low"] = min(observed["low"], c.low)
             observed["close"] = c.close
-        while p is not None or brick_size is not None:
-            upper, lower = ((anchor * up_factor, anchor * down_factor) if p is not None
-                            else (anchor + brick_size, anchor - brick_size))
-            if upper == anchor or lower == anchor:
-                raise ValueError("brick size is too small for Decimal precision at this price")
-            if c.close >= upper:
-                target = upper
-            elif c.close <= lower:
-                target = lower
-            else:
-                break
-            emit("move", span_start, c.timestamp + MINUTE, c.timestamp + MINUTE,
-                 anchor, target, pending_count,
-                 "exact_percentage_close_projection" if p is not None else "prior_daily_atr_close_projection",
-                 observed, c, pending_breakout)
-            anchor = target  # KEEP the unused displacement; never reset to c.close/c.open.
-            span_start = c.timestamp + MINUTE
-            pending_count, observed = 0, None
-            pending_breakout = None
+        consume(c.close, c.timestamp + MINUTE, c.timestamp + MINUTE, c)
         previous = c
     if first is None:
         raise ValueError("No minute candles supplied")
-    flush("end_of_input")
+    pending = None
+    if session_mode == "daily":
+        flush("end_of_input")
+    elif pending_count or anchor != previous.close:
+        pending = {"open": float(anchor), "last_price": float(previous.close),
+                   "move_pct": float((previous.close - anchor) / anchor * HUNDRED),
+                   "source_minutes": pending_count, "start": span_start.isoformat(),
+                   "last_minute": previous.timestamp.isoformat(), "ath_breakout": pending_breakout,
+                   "observed_ohlc": {k: float(v) for k, v in observed.items()} if observed else None}
     irregular = [{"date": str(day), "first": a.isoformat(), "last": b.isoformat(), "minutes": n}
                  for day, (a, b, n) in sessions.items()
                  if a.time() != time(9, 15) or b.time() != time(15, 29) or n != 375]
     visible = bars if include_partials else [b for b in bars if b["kind"] != "partial"]
     result = {"metadata": {
-        "algorithm_version": "2.3.0", "percentage": float(p) if p is not None else None,
+        "algorithm_version": "2.5.0", "percentage": float(p) if p is not None else None,
         "mode": "exact_percentage_close" if p is not None else "prior_daily_atr_close",
-        "sizing": sizing,
+        "sizing": sizing, "session_mode": session_mode, "pending_move": pending,
+        "absorbed_small_session_gaps": absorbed_gaps, "absorbed_unknown_intervals": absorbed_unknown,
         "include_partials": include_partials,
         "timezone": "Asia/Kolkata", "timestamp_convention": "minute_start",
         "first_minute": first.timestamp.isoformat(), "last_minute": previous.timestamp.isoformat(),
@@ -313,12 +353,12 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             ("1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision."
              if p is not None else "Full ATR bricks have a point size equal to prior daily ATR; their percentage size varies with price."),
             "Normal OHLC is a synthetic close-based projection without wicks; observed OHLC is separate and never assigned as a brick's high/low.",
-            "Each crossed sizing threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
-            "Only minute closes confirm bricks. Multiple bricks from one close share known_at; intraminute crossing times are unknown.",
-            "source_minutes counts newly consumed observations; extra bricks from the same minute count zero. Sum counts only with partials included.",
-            "Every session starts a fresh anchor. Daily/final residuals are included by default, followed by unsplit gaps. A flat session retains a zero-height partial.",
+            "Each crossed sizing threshold emits a brick. Reversal uses one brick. Threshold mode carries unfinished displacement across sessions; daily mode flushes every session.",
+            "Minute closes confirm ordinary bricks; threshold mode also processes observed session/post-missing-data opens at their opening timestamp. No current minute high/close is used for an opening-confirmed brick.",
+            "source_minutes counts newly consumed observations; extra bricks from one observation count zero. Sum displayed counts plus pending_move counts, with partials included.",
+            "Threshold mode: only gaps at or above the chosen percent of the previous observed close (or current ATR point size) split out. A nonzero preceding remainder is emitted immediately before that full gap. No day-end or final partial is plotted. Daily mode retains the earlier daily remainder behavior.",
             "Every displayed percentage uses its own brick's open. Remainders preserve actual price displacement without rounding to a full brick.",
-            "Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
+            "Small missing-interval endpoint changes can complete normal bricks in threshold mode; their confirmation is explicitly labeled and the missing path remains unknown. Large unknown-interval bridges stay classified data_gap. Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
             "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
             "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
             "CSV minute-start IST labels are floored; minute collisions use first/max/min/last unless error policy is selected.",
@@ -340,7 +380,7 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             "ATR uses observed daily H/L/C, not synthetic Renko bricks. Only 375-minute 09:15-15:29 regular sessions enter the ATR calculation.",
             "TR=max(H-L, abs(H-previous eligible close), abs(L-previous eligible close)); first TR=H-L. Seed with N TRs, then Wilder smoothing.",
             "Incomplete/nonstandard prior sessions are excluded from ATR; the next eligible TR references the last eligible close. Existing ATR carries across skipped sessions.",
-            "The first N eligible daily candles are warm-up; no invented ATR or full bricks. Daily remainders and gaps remain visible. Zero ATR also emits no full bricks.",
+            "The first N eligible daily candles are warm-up; no invented ATR or full bricks. Threshold mode retains only pending metadata during warm-up. Daily mode shows remainders and gaps. Zero ATR also emits no full bricks.",
         ])
     return result
 
@@ -403,9 +443,9 @@ def make_chart(result: dict):
     label = (f"daily ATR({result['metadata']['atr_period']})" if result['metadata'].get('sizing') == 'atr'
              else f"{result['metadata']['percentage']:g}%")
     fig.update_layout(
-        title=f"NIFTY 50 • {label} close-based bricks",
+        title=f"{result['metadata'].get('display_name', 'Instrument')} • {label} close-based bricks",
         template="plotly_white", height=680,
-        yaxis_title="Index level (calculated brick boundaries)",
+        yaxis_title="Price / index level (calculated brick boundaries)",
         xaxis_title="Sequential blocks • equal spacing, variable elapsed time",
         xaxis_rangeslider_visible=False,
         xaxis=dict(tickmode="array", tickvals=[positions[b["bar_id"]] for b in ticks],
@@ -416,22 +456,70 @@ def make_chart(result: dict):
     return fig
 
 
-def create_app(csv_path: str | Path = DEFAULT_CSV):
-    """Local read-only FastAPI service. File must be downloaded before startup."""
+def local_metadata(path: Path, expected_symbol: str | None = None) -> dict:
+    from stock_data import normalize_symbol
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        row = next(csv.DictReader(f), None)
+    if not row or not row.get("Instrument"):
+        raise ValueError("CSV requires a nonempty Instrument column")
+    symbol = normalize_symbol(row["Instrument"])
+    if expected_symbol and symbol != normalize_symbol(expected_symbol):
+        raise ValueError(f"CSV is for {symbol}, not {expected_symbol}")
+    original = symbol == "NIFTY50" and path.resolve() == DEFAULT_CSV.resolve()
+    return {"symbol": symbol, "instrument": symbol,
+            "display_name": "NIFTY 50" if symbol == "NIFTY50" else symbol,
+            "instrument_type": "index" if symbol == "NIFTY50" else "equity",
+            "source_provider": "Original NIFTY CSV" if original else "Local CSV",
+            "source_url": SOURCE_URL if original else None,
+            "source_limitations": "Observed source history only; missing intervals and gaps are preserved. ATH* is not a verified lifetime high."}
+
+
+def create_app(csv_path: str | Path = DEFAULT_CSV, *, stock_dir=None,
+               default_symbol="NIFTY50", source_symbol="NIFTY50"):
+    """Local API with explicit stock downloads and immutable per-symbol snapshots."""
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
-    app = FastAPI(title="NIFTY percentage and ATR OHLC blocks", version="2.3.0")
+    from stock_data import DEFAULT_DATA, DownloadError, cached_stock, download_stock, normalize_symbol
+    app = FastAPI(title="RealRenko stock and index OHLC blocks", version="2.5.0")
     source = Path(csv_path).resolve()
+    stock_dir = Path(stock_dir) if stock_dir is not None else DEFAULT_DATA
+    default_symbol, source_symbol = normalize_symbol(default_symbol), normalize_symbol(source_symbol)
     static = Path(__file__).with_name("static")
     app.mount("/assets", StaticFiles(directory=static), name="assets")
 
-    @lru_cache(maxsize=4)
-    def calculate(sizing: str, p: str, atr_period: int, mtime_ns: int, size: int):
-        # Cache key includes file state; errors are not cached.
-        return convert_minutes(read_minutes(source), p, include_partials=True, sizing=sizing, atr_period=atr_period)
+    def resolve_source(symbol):
+        symbol = normalize_symbol(symbol)
+        if symbol == source_symbol:
+            return source, local_metadata(source, symbol)
+        return cached_stock(symbol, stock_dir)
 
-    def get_result(percentage, start, end, include_partials, sizing, atr_period):
+    @lru_cache(maxsize=4)
+    def calculate(path: str, symbol: str, sizing: str, p: str, atr_period: int, session_mode: str, mtime_ns: int, size: int):
+        return convert_minutes(read_minutes(path, expected_instrument=symbol), p, include_partials=True,
+                               sizing=sizing, atr_period=atr_period, session_mode=session_mode)
+
+    def missing(symbol):
+        return HTTPException(503, f"No data for {symbol}. Use Download & plot for a stock, or run python nifty_bars.py --download for the original NIFTY CSV.")
+
+    @app.post("/download")
+    def download(symbol: str = Query(...), days: int = Query(28, ge=1, le=28)):
+        try:
+            _, metadata = download_stock(symbol, days, stock_dir)
+            return {"metadata": metadata}
+        except DownloadError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(503, "Cannot save the stock download. Check server data-directory permissions.") from exc
+
+    @app.get("/bars")
+    def bars(percentage: str = Query("1", description="1 or 1% means one percent"),
+             start: date | None = None, end: date | None = None, include_partials: bool = True,
+             sizing: str = Query("percentage", description="percentage or atr"),
+             atr_period: int = Query(14, ge=1, description="Daily Wilder ATR length; positive whole number"),
+             symbol: str = default_symbol, session_mode: str = "threshold"):
         try:
             if sizing not in ("percentage", "atr"):
                 raise ValueError("sizing must be 'percentage' or 'atr'")
@@ -439,54 +527,58 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
             period = parse_atr_period(atr_period) if sizing == "atr" else 14
             if start and end and start > end:
                 raise ValueError("start must be on or before end")
-            stat = source.stat()
-            data = calculate(sizing, p, period, stat.st_mtime_ns, stat.st_size)
-            return filter_result(data, start, end, include_partials=include_partials)
+            path, metadata = resolve_source(symbol)
+            stat = path.stat()
+            data = calculate(str(path), metadata["symbol"], sizing, p, period, session_mode, stat.st_mtime_ns, stat.st_size)
+            result = filter_result(data, start, end, include_partials=include_partials)
+            result["metadata"] = {**result["metadata"], **metadata}
+            return result
         except FileNotFoundError:
-            raise HTTPException(503, "CSV missing. Run python nifty_bars.py --download first.")
+            raise missing(symbol)
         except (ValueError, InvalidOperation) as exc:
             raise HTTPException(422, str(exc)) from exc
 
-    @app.get("/bars")
-    def bars(percentage: str = Query("1", description="1 or 1% means one percent"),
-             start: date | None = None, end: date | None = None, include_partials: bool = True,
-             sizing: str = Query("percentage", description="percentage or atr"),
-             atr_period: int = Query(14, ge=1, description="Daily Wilder ATR length; positive whole number")):
-        return get_result(percentage, start, end, include_partials, sizing, atr_period)
-
-    @lru_cache(maxsize=1)
-    def calculate_history(mtime_ns: int, size: int):
+    @lru_cache(maxsize=4)
+    def calculate_history(path: str, symbol: str, mtime_ns: int, size: int):
         from daily_history import daily_history
-        return daily_history(source)
+        return daily_history(path, expected_instrument=symbol)
 
     @app.get("/history")
-    def history(start: date | None = None, end: date | None = None):
+    def history(start: date | None = None, end: date | None = None, symbol: str = default_symbol):
         try:
-            stat = source.stat()
-            return filter_result(calculate_history(stat.st_mtime_ns, stat.st_size), start, end)
+            path, metadata = resolve_source(symbol)
+            stat = path.stat()
+            result = filter_result(calculate_history(str(path), metadata["symbol"], stat.st_mtime_ns, stat.st_size), start, end)
+            result["metadata"] = {**result["metadata"], **metadata}
+            return result
         except FileNotFoundError:
-            raise HTTPException(503, "CSV missing. Run python nifty_bars.py --download first.")
+            raise missing(symbol)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 
     @app.get("/", include_in_schema=False)
     def index():
-        return RedirectResponse("/chart")
+        return RedirectResponse("/chart?" + urllib.parse.urlencode({"symbol": default_symbol}))
 
     @app.get("/chart", response_class=HTMLResponse)
     def chart():
-        # The lightweight shell loads first; its controls fetch /bars or /history.
-        return HTMLResponse(static.joinpath("chart.html").read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-cache"})
+        import html
+        shell = static.joinpath("chart.html").read_text(encoding="utf-8")
+        shell = shell.replace('data-default-symbol="NIFTY50"', f'data-default-symbol="{html.escape(default_symbol)}"')
+        return HTMLResponse(shell, headers={"Cache-Control": "no-cache"})
 
     return app
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--csv", type=Path, default=DEFAULT_CSV)
-    parser.add_argument("--download", action="store_true", help="Fetch/refresh the supplied source URL")
+    parser.add_argument("--csv", type=Path, help="Local CSV in the documented schema; use --symbol to check its identity")
+    parser.add_argument("--symbol", help="NSE equity symbol, e.g. TCS or RELIANCE; default NIFTY50")
+    parser.add_argument("--days", type=int, default=28, help="Recent calendar days to download (1–28)")
+    parser.add_argument("--data-dir", type=Path, help="Directory for per-stock download snapshots")
+    parser.add_argument("--download", action="store_true", help="Download recent stock minutes, or the original NIFTY CSV")
     parser.add_argument("--percentage", default="1", help="1 or 1%% means one percent")
+    parser.add_argument("--session-mode", choices=("threshold", "daily"), default="threshold", help="Carry unfinished moves (default), or show a remainder every session")
     parser.add_argument("--sizing", choices=("percentage", "atr"), default="percentage", help="Renko brick sizing method")
     parser.add_argument("--atr-period", type=parse_atr_period, default=14, help="Daily Wilder ATR length (7, 10, 14 or any positive integer)")
     parser.add_argument("--output", type=Path, default=Path("bars.json"))
@@ -498,21 +590,38 @@ def main():
     parser.add_argument("--serve", action="store_true", help="Serve /bars, /chart and /docs locally")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
+    from stock_data import DEFAULT_DATA, cached_stock, download_stock, normalize_symbol
+    stock_dir = args.data_dir or DEFAULT_DATA
+    symbol = normalize_symbol(args.symbol or "NIFTY50")
+    custom_csv = args.csv is not None
+    if custom_csv and args.download and symbol != "NIFTY50":
+        parser.error("Use --data-dir for stock downloads; --csv is for an existing local file.")
     if args.download:
-        download_csv(args.csv)
+        if symbol == "NIFTY50":
+            download_csv(args.csv or DEFAULT_CSV)
+        else:
+            download_stock(symbol, args.days, stock_dir)
+    if custom_csv or symbol == "NIFTY50":
+        args.csv = args.csv or DEFAULT_CSV
+        metadata = local_metadata(args.csv, args.symbol) if args.csv.exists() else {}
+        symbol = metadata.get("symbol", symbol)
+    else:
+        args.csv, metadata = cached_stock(symbol, stock_dir)
     if args.serve:
         import uvicorn
-        uvicorn.run(create_app(args.csv), host="127.0.0.1", port=args.port)
+        uvicorn.run(create_app(args.csv if custom_csv else DEFAULT_CSV, stock_dir=stock_dir,
+                               default_symbol=symbol, source_symbol=symbol if custom_csv else "NIFTY50"),
+                    host="127.0.0.1", port=args.port)
         return
-    result = filter_result(convert_minutes(read_minutes(args.csv), args.percentage, include_partials=True,
-                                          sizing=args.sizing, atr_period=args.atr_period),
+    result = filter_result(convert_minutes(read_minutes(args.csv, expected_instrument=symbol), args.percentage, include_partials=True,
+                                          sizing=args.sizing, atr_period=args.atr_period, session_mode=args.session_mode),
                            args.start, args.end, include_partials=args.include_partials)
     with args.csv.open("rb") as src:
         digest = hashlib.sha256()
         for chunk in iter(lambda: src.read(1024 * 1024), b""):
             digest.update(chunk)
     result["metadata"]["source_sha256"] = digest.hexdigest()
-    result["metadata"]["source_url"] = SOURCE_URL
+    result["metadata"].update(metadata)
     args.output.write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")
     if args.html:
         make_chart(result).write_html(args.html, include_plotlyjs=True)

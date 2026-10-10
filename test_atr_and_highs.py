@@ -12,6 +12,11 @@ from daily_history import daily_history
 from nifty_bars import Candle, IST, convert_minutes, create_app, filter_result, make_chart
 from test_nifty_bars import c
 
+# These established fixtures exercise the retained daily-remainder policy.
+# Default threshold-mode behavior is covered separately in test_threshold_mode.py.
+from functools import partial as bind_policy
+convert_minutes = bind_policy(convert_minutes, session_mode="daily")
+
 
 def day(day_number, o, h, l, close):
     """375 valid minutes with the day's H/L observed in the first minute."""
@@ -101,7 +106,7 @@ class ATRTests(unittest.TestCase):
             source, output = Path(temp)/'source.csv', Path(temp)/'bars.json'
             write_csv(source, day(1,100,101,99,100)+day(2,100,105,100,105))
             client = TestClient(create_app(source))
-            response = client.get('/bars?sizing=atr&atr_period=1')
+            response = client.get('/bars?session_mode=daily&sizing=atr&atr_period=1')
             self.assertEqual(response.status_code,200,response.text)
             result = response.json()
             self.assertEqual(result['metadata']['mode'],'prior_daily_atr_close')
@@ -110,14 +115,14 @@ class ATRTests(unittest.TestCase):
             self.assertIn('ATR(1)',fig.layout.title.text)
             self.assertIn('ATH*',[trace.name for trace in fig.data])
             for query in ('atr_period=0','atr_period=-1','atr_period=1.5','atr_period=abc','sizing=bad'):
-                self.assertEqual(client.get('/bars?sizing=atr&'+query).status_code,422)
-            subprocess.run([sys.executable,str(Path(__file__).with_name('nifty_bars.py')),'--csv',str(source),
+                self.assertEqual(client.get('/bars?session_mode=daily&sizing=atr&'+query).status_code,422)
+            subprocess.run([sys.executable,str(Path(__file__).with_name('nifty_bars.py')), '--session-mode', 'daily','--csv',str(source),
                             '--sizing','atr','--atr-period','1','--output',str(output)],check=True,capture_output=True)
             self.assertEqual(json.loads(output.read_text())['bars'],result['bars'])
             # Cache keys must not confuse distinct modes/periods.
-            warmup = client.get('/bars?sizing=atr&atr_period=7').json()
+            warmup = client.get('/bars?session_mode=daily&sizing=atr&atr_period=7').json()
             self.assertFalse(any(b['kind']=='move' for b in warmup['bars']))
-            self.assertEqual(client.get('/bars?percentage=3').json()['metadata']['sizing'],'percentage')
+            self.assertEqual(client.get('/bars?session_mode=daily&percentage=3').json()['metadata']['sizing'],'percentage')
 
 
 class RecordHighTests(unittest.TestCase):
