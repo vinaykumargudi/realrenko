@@ -36,3 +36,11 @@ export function earlierMonth(date, months) {
 export function priceChange(bars) {
   return bars.length ? (bars.at(-1).close / bars[0].open - 1) * 100 : null;
 }
+
+export function breakoutMarkers(bars, points) {
+  return bars.flatMap((bar,i) => bar.ath_breakout ? [{
+    time: points[i].time, position: 'aboveBar', shape: 'circle', color: '#eab84f',
+    // Keep a dot on every affected brick, but avoid repeated labels in a run.
+    text: i && bars[i-1].ath_breakout ? '' : 'ATH*', size: .65, id: `ath-${bar.bar_id}`,
+  }] : []);
+}

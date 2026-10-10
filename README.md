@@ -1,5 +1,98 @@
-# RealRenko — continuous percentage bricks, daily remainders and full-size gaps
+# RealRenko — percentage / ATR bricks, daily remainders and full-size gaps
 
+
+## Version 2.3: ATR sizing and new-high markers
+
+Choose **Sizing → ATR · daily**, then select **7**, **10**, **14**, or enter a
+custom positive whole-number length and press **Apply**. Percentage sizing
+remains available. The **ATR length in the top toolbar sizes Renko bricks**;
+it is separate from the ATR length inside the Supertrend indicator settings.
+
+- Chart: http://127.0.0.1:8000/chart?sizing=atr&atr_period=14
+- API: http://127.0.0.1:8000/bars?sizing=atr&atr_period=7
+- Custom example: http://127.0.0.1:8000/chart?sizing=atr&atr_period=21
+
+### How ATR sets the brick size
+
+The period counts **daily candles**, not minute candles or Renko bricks.
+The current implementation uses **1 × prior daily Wilder ATR** as the full
+brick's point size for the entire next observed session. For example, a
+120-point ATR gives full bricks of +120 or −120 points; their percentages will
+vary with price. Reversals still use one brick. Daily remainders and full-size
+opening gaps remain visible, using the same session reset as percentage mode.
+
+For each eligible daily candle:
+
+```text
+TR = max(high − low, abs(high − previous close), abs(low − previous close))
+first TR = high − low
+initial ATR = mean(first N true ranges)
+next ATR = (previous ATR × (N − 1) + new TR) / N
+```
+
+[ATR formula and RMA reference](https://www.tradingview.com/support/solutions/43000501823-average-true-range-atr/).
+We aggregate actual minute OHLC into daily OHLC, then use only earlier daily
+candles for sizing. A session's own range never changes its brick size, and a
+later daily ATR never resizes older bricks. Changing the display dates happens
+after conversion and keeps the prior history used for warm-up.
+
+A daily candle is eligible only if all **375 minutes, 09:15–15:29 IST**, are
+observed. Incomplete or nonstandard prior sessions are skipped for ATR and
+listed in `atr_skipped_prior_sessions`; the previous ATR carries forward. The
+next eligible true range references the last eligible close, so a gap across
+excluded dates is included in that range. No exchange calendar is inferred.
+This explicit convention can differ from another charting platform's ATR Renko.
+
+Until N eligible prior daily candles exist, **warm-up remainders and gaps still
+appear**, but no full ATR bricks are invented. Zero ATR behaves the same way
+until a positive prior ATR exists. The inspector shows **Target brick size**
+and **ATR through** for each selected brick. ATR mode returns:
+
+- `metadata.sizing = "atr"`, `mode = "prior_daily_atr_close"`, `percentage = null`.
+- `atr_period`, `atr_timeframe = "1D"`, `atr_smoothing` and the sizing policy.
+- Per brick: `brick_size_points`, `atr_value`, `atr_as_of`, and
+  `atr_status` (`ready`, `warmup`, or `zero_atr`).
+- `move_pct` remains the actual movement divided by that brick's own open.
+
+Python and CLI:
+
+```python
+from nifty_bars import convert_minutes, read_minutes
+result = convert_minutes(read_minutes("nifty50_candlestick_data.csv"),
+                         sizing="atr", atr_period=14)
+```
+
+```bash
+python nifty_bars.py --sizing atr --atr-period 7 --output atr7.json --html atr7.html
+```
+
+### Spot a breakout to a new history high
+
+The **● ATH*** toggle is on by default. Gold dots mark bricks/daily candles
+whose source observations exceeded every earlier observed source high. The
+**ATH*** text appears at the start of a consecutive run of marked bricks to
+reduce clutter. Select the brick to see the prior record, new source high,
+first breakout time and number of new-high observations grouped into it.
+Standalone `--html` exports include equivalent gold markers.
+
+**ATH* means a record within the available CSV history, which starts on
+9 January 2015. It is not a verified lifetime all-time high.** The first source
+high seeds the baseline without a breakout marker; equal highs do not qualify.
+The rule is a strict break of a **high**, not a close-confirmed breakout. A wick
+can set a new record even if the minute closes lower. Renko OHLC stays unchanged.
+
+The comparison is calculated over all source history before date filtering,
+using original minute highs, not synthetic brick highs. A gap open beyond the
+record marks the gap itself at its observed opening time. Intraminute highs
+are known only at minute completion. Several new highs can belong to one brick;
+extra bricks from the same confirming minute do not duplicate the event.
+A record made before a full brick forms is attached to that brick once it
+forms, or to its remainder. Its original event time remains in the inspector.
+These historical markers are annotations, not real-time trade alerts.
+
+API `ath_breakout` is null or contains `previous_high`, `high`, `first_at`,
+`last_at`, `known_at` and `count`. Metadata records `ath_reference`,
+`ath_history_start`, `ath_latest_high` and `ath_breakout_observations`.
 
 ## Version 2.2: always show the daily remainder
 
@@ -114,7 +207,7 @@ bricks visible without changing stored prices. There are no source wicks.
 The bundled chart library, Apache-2.0 license, and TradingView copyright notice
 are in `static/vendor/`. Required attribution remains visible in the UI.
 
-Python checks (21 tests): `python -m unittest -v` after installing
+Python checks (30 tests): `python -m unittest -v` after installing
 `requirements-dev.txt`. Optional frontend developer checks (Node 20+):
 
 ```bash
@@ -122,9 +215,10 @@ npm ci
 npm test
 ```
 
-Eight frontend tests cover hand-calculated indicators, no-lookahead behavior,
+Nine frontend tests cover hand-calculated indicators, no-lookahead behavior,
 actual chart OHLC, duplicate-time bricks, historical price levels, touching
-rectangle geometry at different pixel ratios, and DOM control interactions. The DOM smoke test uses a stubbed chart engine. A real
+rectangle geometry at different pixel ratios, source-high markers, custom ATR
+controls, and DOM control interactions. The DOM smoke test uses a stubbed chart engine. A real
 browser/canvas visual and gesture check was not available in the build
 environment; the test is not a substitute for that check.
 
@@ -172,8 +266,9 @@ python nifty_bars.py --serve
 ```
 
 Restarting matters: an existing process still holds the previous code and
-cached results. Current JSON identifies itself with
-`metadata.mode = "exact_percentage_close"` and `algorithm_version = "2.2.0"`.
+cached results. Current JSON identifies itself with `algorithm_version = "2.3.0"`.
+Percentage mode remains `metadata.mode = "exact_percentage_close"`; ATR mode
+is `"prior_daily_atr_close"`.
 
 - JSON: http://127.0.0.1:8000/bars?percentage=1
 - Chart: http://127.0.0.1:8000/chart?percentage=1&start=2020-03-01&end=2020-03-31
@@ -184,7 +279,7 @@ cached results. Current JSON identifies itself with
 in URLs). `start` and `end` are inclusive IST dates, `YYYY-MM-DD`. Conversion
 precedes date filtering, so changing the window does not change block geometry.
 
-The service reads the local downloaded CSV and caches four percentage/file
+The service reads the local downloaded CSV and caches four sizing/period/file
 versions per process. It does not download on each request. To use another
 local CSV, pass `--csv PATH` or set `NIFTY_CSV` when running
 `uvicorn main:app --host 127.0.0.1 --port 8000`. API defaults to localhost.
@@ -357,3 +452,17 @@ price connections** match exactly in the returned JSON; all **852,083 source
 minutes** are accounted for. Full bricks remain exactly 3% to floating-point
 precision. See `examples/validation_3pct.json`. These are dataset validation
 counts, not performance results.
+
+
+For the ATR and record-high source audit, run:
+
+```bash
+python validate_atr_source.py --csv nifty50_candlestick_data.csv --output validation_atr_and_highs.json
+```
+
+This independently aggregates daily true ranges, checks 1% and ATR 7/10/14
+brick sizes against prior-session Wilder ATR, verifies price continuity and
+source-minute coverage, and matches every grouped breakout back to original
+source highs. Results are in `examples/validation_atr_and_highs.json`.
+The Python fixtures additionally cover custom periods, warm-up, zero ATR,
+incomplete sessions, API/CLI parity, and independence from future prices.

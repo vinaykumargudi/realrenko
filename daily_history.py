@@ -3,6 +3,7 @@ from collections import Counter
 from datetime import time
 
 from nifty_bars import HUNDRED, MINUTE, read_minutes
+from record_highs import RecordHighs, merge_breakouts
 
 
 def daily_history(path):
@@ -10,6 +11,7 @@ def daily_history(path):
     active = None
     first = last = None
     minutes = raw_rows = 0
+    highs = RecordHighs()
 
     def finish():
         if active is None:
@@ -28,6 +30,7 @@ def daily_history(path):
             'complete_normal_session': complete, 'finalized': complete,
             'direction': 'up' if close > o else 'down' if close < o else 'flat',
             'reason': 'observed_daily_ohlc',
+            'ath_breakout': active['breakout'],
         })
 
     for candle in read_minutes(path):
@@ -38,7 +41,8 @@ def daily_history(path):
         if active is None or candle.timestamp.date() != active['start'].date():
             finish()
             active = {'start': candle.timestamp, 'open': candle.open, 'high': candle.high,
-                      'low': candle.low, 'count': 0}
+                      'low': candle.low, 'count': 0, 'breakout': None}
+        active['breakout'] = merge_breakouts(active['breakout'], highs.observe(candle.high, candle.timestamp, candle.timestamp + MINUTE))
         active['high'] = max(active['high'], candle.high)
         active['low'] = min(active['low'], candle.low)
         active['close'], active['last'] = candle.close, candle.timestamp
@@ -51,6 +55,8 @@ def daily_history(path):
         'first_minute': first.timestamp.isoformat(), 'last_minute': last.timestamp.isoformat(),
         'source_minutes': minutes, 'source_rows': raw_rows, 'observed_sessions': len(bars),
         'bar_counts': dict(Counter(b['kind'] for b in bars)),
+        **highs.metadata(first.timestamp),
         'notes': ['Daily OHLC aggregates observed minute prices; it is not the official calculated closing index.',
+                  'ATH markers use strictly higher observed minute highs across all supplied history, not verified lifetime highs or close-confirmed breakouts.',
                   'Incomplete/nonstandard sessions are flagged; missing prices are never forward filled.'],
     }, 'bars': bars}

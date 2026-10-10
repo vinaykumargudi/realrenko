@@ -1,4 +1,4 @@
-import { chartPoints, selectBars, indexForTime, earlierMonth, priceChange } from './chart-data.mjs';
+import { chartPoints, selectBars, indexForTime, earlierMonth, priceChange, breakoutMarkers } from './chart-data.mjs';
 import { supertrend, ema, sma } from './indicators.mjs';
 import { RenkoSeries } from './renko-series.mjs';
 
@@ -9,7 +9,7 @@ const dateLabel = iso => iso ? new Intl.DateTimeFormat('en-GB', { day: '2-digit'
 const timeLabel = iso => iso ? new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date(iso)) : '—';
 const format = value => Number.isFinite(value) ? number.format(value) : '—';
 const percent = value => Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}%` : '—';
-const state = { raw: [], rows: [], points: [], metadata: null, type: '', key: '', series: null, overlays: [],
+const state = { raw: [], rows: [], points: [], metadata: null, type: '', key: '', series: null, overlays: [], markers: null,
   controller: null, sequence: 0, selected: null, pinned: false, levels: [], priceLines: [], placing: false,
   auto: true, studyValues: new Map(), studies: { supertrend: false, atrPeriod: 10, factor: 3, ema: false, emaPeriod: 20, sma: false, smaPeriod: 50 } };
 let chart, toastTimer;
@@ -92,7 +92,8 @@ function initializeChart() {
 }
 function inspect(b) {
   if (!b) {
-    for (const k of ['legend-open','legend-high','legend-low','legend-close','legend-move','detail-price','detail-change','detail-open','detail-high','detail-low','detail-close','detail-percent','detail-confirmed','detail-minutes','detail-date','block-id']) text(k, '—');
+    $('breakout-detail').hidden = true;
+    for (const k of ['legend-open','legend-high','legend-low','legend-close','legend-move','detail-price','detail-change','detail-open','detail-high','detail-low','detail-close','detail-percent','detail-confirmed','detail-minutes','detail-date','block-id','detail-size','detail-atr-date']) text(k, '—');
     text('block-kind', 'No block selected'); return;
   }
   state.selected = b;
@@ -103,15 +104,30 @@ function inspect(b) {
   text('detail-change', `${b.close >= b.open ? '+' : ''}${format(b.close - b.open)}  (${percent(b.move_pct)})`);
   paintChange($('detail-change'), b.move_pct);
   text('detail-percent', percent(b.move_pct)); text('detail-date', `${dateLabel(b.end)} · ${timeLabel(b.end)} IST`);
+  const atrSizing = state.metadata?.sizing === 'atr';
+  $('brick-size-row').hidden = state.type !== 'renko'; $('atr-asof-row').hidden = !atrSizing;
+  text('detail-size', atrSizing ? (b.brick_size_points == null ? b.atr_status === 'zero_atr' ? 'Zero ATR · no full bricks' : 'ATR warming up' : `${format(b.brick_size_points)} points`)
+    : `${state.metadata?.percentage}%`);
+  text('detail-atr-date', b.atr_as_of ? dateLabel(`${b.atr_as_of}T15:30:00+05:30`) : 'Awaiting daily history');
   text('detail-confirmed', `${dateLabel(b.known_at)} ${timeLabel(b.known_at)}`);
   text('detail-minutes', b.source_minutes.toLocaleString('en-IN'));
   text('block-id', `#${b.bar_id + 1}`); text('block-kind', kinds[b.kind] || b.kind);
   text('selection-state', state.pinned ? 'Pinned' : 'Hover to inspect'); $('unpin-button').hidden = !state.pinned;
-  text('block-explanation', b.kind === 'move' ? 'An exact percentage block. Excess movement continues into the next block.'
+  text('block-explanation', b.kind === 'move' ? atrSizing
+    ? `A full ${format(b.brick_size_points)}-point brick, using daily ATR(${b.atr_period}) through ${b.atr_as_of}. This size stays fixed for the session; its percentage varies with price.`
+    : 'An exact percentage block. Excess movement continues into the next block.'
     : b.kind === 'session_gap' ? 'Full gap from the previous observed close to the next session open. It is not split into smaller blocks.'
     : b.kind === 'data_gap' ? 'An interval is missing or has nonstandard session times. This bar connects its known endpoints.'
     : b.kind === 'partial' ? `The remaining move from the last brick boundary to the observed close. Shown at its exact size; the percentage uses this brick’s own open.${b.finalized === false ? ' This last remainder can change as more minutes arrive.' : ''}${b.open === b.close ? ' Price is unchanged, so this brick is a horizontal tick.' : ''}`
     : b.complete_normal_session ? 'Observed daily OHLC, aggregated from the source minute candles.' : 'Observed daily OHLC. This date has incomplete or nonstandard session coverage.');
+  if (atrSizing && b.atr_status !== 'ready') $('block-explanation').textContent += b.atr_status === 'zero_atr'
+    ? ' Prior ATR is zero; this observed move is retained without inventing a positive brick size.'
+    : ` ATR(${b.atr_period}) needs ${b.atr_period} complete prior daily candles. Observed moves remain visible during warm-up.`;
+  $('breakout-detail').hidden = !b.ath_breakout;
+  if (b.ath_breakout) {
+    const event = b.ath_breakout;
+    text('breakout-detail', `● ATH* · Source high ${format(event.high)} exceeded the prior record ${format(event.previous_high)}. First break: ${dateLabel(event.first_at)} ${timeLabel(event.first_at)} IST. ${event.count} new high observation${event.count === 1 ? '' : 's'} in this block. This uses the source high, not a closing-price breakout.`);
+  }
   updateIndicatorLegend(b);
 }
 function updateIndicatorLegend(bar) {
@@ -173,15 +189,21 @@ function zoom(factor) {
   const middle = (r.from + r.to) / 2, half = Math.max(4, (r.to - r.from) * factor / 2);
   chart.timeScale().setVisibleLogicalRange({ from: middle - half, to: middle + half });
 }
+function sizingQuery() {
+  return $('sizing-mode').value === 'atr'
+    ? { sizing: 'atr', atr_period: $('brick-atr-period').value }
+    : { percentage: $('percentage').value || '1' };
+}
 function shareURL() {
-  const q = new URLSearchParams(); q.set('percentage', $('percentage').value || '1');
+  const q = new URLSearchParams(sizingQuery());
   if ($('start-date').value) q.set('start', $('start-date').value);
   if ($('end-date').value) q.set('end', $('end-date').value);
   if ($('view-mode').value !== 'renko') q.set('view', $('view-mode').value);
+  if (!$('show-ath').checked) q.set('ath', 'false');
   history.replaceState(null, '', `/chart?${q}`);
-  const dataQuery = new URLSearchParams(q); dataQuery.delete('view');
+  const dataQuery = new URLSearchParams(q); dataQuery.delete('view'); dataQuery.delete('ath');
   if (state.type === 'renko') dataQuery.set('include_partials', 'true');
-  if (state.type !== 'renko') { dataQuery.delete('percentage'); dataQuery.delete('include_partials'); }
+  if (state.type !== 'renko') for (const name of ['percentage','include_partials','sizing','atr_period']) dataQuery.delete(name);
   $('json-link').href = `${state.type === 'renko' ? '/bars' : '/history'}?${dataQuery}`;
 }
 function render(reset = true) {
@@ -189,6 +211,7 @@ function render(reset = true) {
   const previousRange = chart.timeScale().getVisibleLogicalRange();
   state.rows = selectBars(state.raw, { start: $('start-date').value, end: $('end-date').value });
   for (const s of state.overlays) chart.removeSeries(s); state.overlays = [];
+  state.markers?.detach(); state.markers = null;
   if (state.series) chart.removeSeries(state.series);
   state.points = chartPoints(state.rows, colors());
   state.series = state.type === 'renko'
@@ -198,16 +221,19 @@ function render(reset = true) {
     : chart.addSeries(L.CandlestickSeries, { upColor: colors().green, downColor: colors().red, borderVisible: false, priceLineVisible: true, priceFormat: { type: 'price', precision: 2, minMove: .01 } });
   state.series.setData($('view-mode').value === 'daily-line'
     ? state.points.map(p => ({ time: p.time, value: p.close })) : state.points);
+  state.markers = L.createSeriesMarkers(state.series, $('show-ath').checked ? breakoutMarkers(state.rows, state.points) : []);
   state.priceLines = []; state.levels.forEach(addLevel);
   prepareStudies(); drawStudies();
   state.pinned = false; $('unpin-button').hidden = true;
   const counts = state.rows.reduce((a, b) => { a[b.kind] = (a[b.kind] || 0) + 1; return a; }, {});
-  text('chart-mode', state.type === 'renko' ? `${state.metadata.percentage}% Renko` : $('view-mode').value === 'daily-line' ? 'Daily price trend' : 'Daily candles');
+  const renkoLabel = state.metadata.sizing === 'atr' ? `ATR(${state.metadata.atr_period}) · daily Renko` : `${state.metadata.percentage}% Renko`;
+  text('chart-mode', state.type === 'renko' ? renkoLabel : $('view-mode').value === 'daily-line' ? 'Daily price trend' : 'Daily candles');
   document.querySelector('.mode-tag').textContent = state.type === 'renko' ? 'Remainders + gaps' : 'Observed OHLC';
   text('count-moves', String(counts.move || counts.price || 0)); $('count-moves').previousElementSibling.textContent = state.type === 'renko' ? 'Normal blocks' : 'Trading dates';
   text('count-gaps', String(counts.session_gap || 0)); text('count-unknown', String(counts.data_gap || 0));
   text('count-partials', String(counts.partial || 0));
   text('dataset-dates', `${dateLabel(state.metadata.first_minute)} — ${dateLabel(state.metadata.last_minute)}`);
+  text('ath-history-note', `*ATH = new source-history high since ${dateLabel(state.metadata.ath_history_start || state.metadata.first_minute)}. Earlier lifetime highs are unavailable.`);
   const change = priceChange(state.rows), changeElement = $('window-return').querySelector('b');
   changeElement.textContent = percent(change); paintChange(changeElement, change);
   $('window-return').title = 'First open to last close across the loaded date window; not strategy returns.';
@@ -224,15 +250,17 @@ function render(reset = true) {
     $('status-dot').classList.add('ready');
   }
   for (const b of document.querySelectorAll('[data-percent]')) b.classList.toggle('active', Number(b.dataset.percent) === Number($('percentage').value));
+  for (const b of document.querySelectorAll('[data-atr]')) b.classList.toggle('active', Number(b.dataset.atr) === Number($('brick-atr-period').value));
   shareURL();
 }
 async function loadData() {
   const type = $('view-mode').value === 'renko' ? 'renko' : 'daily';
   updateModeControls(type);
   if (!$('controls').reportValidity()) return;
+  if (type === 'renko' && $('sizing-mode').value === 'atr' && !Number.isSafeInteger(Number($('brick-atr-period').value))) { toast('ATR length must be a positive whole number.'); return; }
   if ($('start-date').value && $('end-date').value && $('start-date').value > $('end-date').value) { toast('The start date must be before the end date.'); return; }
-  const query = type === 'renko' ? new URLSearchParams({ percentage: $('percentage').value, include_partials: 'true' }) : new URLSearchParams();
-  const key = `${type}:${type === 'renko' ? $('percentage').value : ''}`;
+  const query = type === 'renko' ? new URLSearchParams({ ...sizingQuery(), include_partials: 'true' }) : new URLSearchParams();
+  const key = `${type}:${query}`;
   state.controller?.abort();
   const sequence = ++state.sequence;
   if (key === state.key && state.metadata) { state.type = type; $('apply-button').disabled = false; render(true); return; }
@@ -253,7 +281,12 @@ async function loadData() {
   } finally { if (sequence === state.sequence) $('apply-button').disabled = false; }
 }
 function updateModeControls(type) {
-  for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]')]) element.disabled = type !== 'renko';
+  const atrSizing = $('sizing-mode').value === 'atr';
+  $('sizing-mode').disabled = type !== 'renko';
+  $('percentage-control').hidden = atrSizing; $('percentage-presets').hidden = atrSizing;
+  $('atr-control').hidden = !atrSizing; $('atr-presets').hidden = !atrSizing;
+  for (const element of [$('percentage'), ...document.querySelectorAll('[data-percent]')]) element.disabled = type !== 'renko' || atrSizing;
+  for (const element of [$('brick-atr-period'), ...document.querySelectorAll('[data-atr]')]) element.disabled = type !== 'renko' || !atrSizing;
   text('indicator-basis', type === 'renko' ? 'All Renko bricks, including daily remainders and gap bars. Values on the current remainder can change with new minutes.' : 'Observed daily OHLC, with all available prior dates used for warm-up.');
 }
 function changeTheme() {
@@ -266,7 +299,10 @@ function events() {
   $('controls').addEventListener('submit', event => { event.preventDefault(); loadData(); });
   $('retry-button').addEventListener('click', loadData);
   $('view-mode').addEventListener('change', loadData);
+  $('show-ath').addEventListener('change', () => { state.markers?.setMarkers($('show-ath').checked ? breakoutMarkers(state.rows, state.points) : []); shareURL(); });
+  $('sizing-mode').addEventListener('change', loadData);
   for (const b of document.querySelectorAll('[data-percent]')) b.addEventListener('click', () => { $('percentage').value = b.dataset.percent; loadData(); });
+  for (const b of document.querySelectorAll('[data-atr]')) b.addEventListener('click', () => { $('brick-atr-period').value = b.dataset.atr; loadData(); });
   for (const button of document.querySelectorAll('[data-range]')) button.addEventListener('click', async () => {
     if (!state.metadata) return;
     for (const b of document.querySelectorAll('[data-range]')) b.classList.toggle('active', b === button);
@@ -340,6 +376,9 @@ try {
   const q = new URLSearchParams(location.search);
   const p = Number((q.get('percentage') || '1').replace('%', ''));
   if (Number.isFinite(p) && p > 0 && p < 100) $('percentage').value = String(p);
+  if (q.get('sizing') === 'atr') $('sizing-mode').value = 'atr';
+  if (q.has('atr_period')) $('brick-atr-period').value = q.get('atr_period');
+  $('show-ath').checked = q.get('ath') !== 'false';
   $('start-date').value = q.get('start') || ''; $('end-date').value = q.get('end') || '';
   if (['daily-line','daily-candles'].includes(q.get('view'))) $('view-mode').value = q.get('view');
   $('details-toggle').setAttribute('aria-pressed', String(!matchMedia('(max-width:900px)').matches));

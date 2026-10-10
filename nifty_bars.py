@@ -1,4 +1,4 @@
-"""Exact-percentage close-based bricks with explicit, unsplit gap bridges.
+"""Percentage or daily ATR close-based Renko bricks with unsplit gap bridges.
 
 Python 3.10+. The converter/CLI use only the standard library. API/plotting
 dependencies are in requirements.txt. Run `python nifty_bars.py --help`.
@@ -25,6 +25,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 from zoneinfo import ZoneInfo
+
+from atr_sizing import DailyATR, parse_atr_period
+from record_highs import RecordHighs, merge_breakouts
 
 SOURCE_URL = "https://raw.githubusercontent.com/sandeepkapri/Nifty50-Minute-Data/refs/heads/main/nifty50_candlestick_data.csv"
 IST = ZoneInfo("Asia/Kolkata")
@@ -144,8 +147,9 @@ def validate_candle(c: Candle, previous: Candle | None) -> None:
         raise ValueError(f"Invalid OHLC at {c.timestamp.isoformat()}")
 
 
-def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials=True) -> dict:
-    """Build exact-percentage close-based bricks, carrying excess forward.
+def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials=True,
+                    sizing="percentage", atr_period=14) -> dict:
+    """Build percentage or daily ATR close-based bricks, carrying excess forward.
 
     Normal OHLC is synthetic: O=anchor, C=anchor*(1 +/- p/100), H=max(O,C),
     L=min(O,C). Consume all thresholds crossed by a minute CLOSE, then retain
@@ -156,13 +160,25 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
     anchor to the next observed open. Session/end-of-input residuals are
     partials, included by default to connect every price boundary. Flat sessions
     retain a zero-height partial. No intraminute price path is reconstructed.
+
+    sizing='atr' uses the prior eligible daily Wilder ATR as a fixed point size
+    throughout each session. Warm-up/zero ATR days retain remainders and gaps
+    but cannot confirm full bricks. Current/future daily ranges never resize
+    earlier bricks. atr_period counts fully observed regular daily candles.
     """
-    p = parse_percent(percentage)
-    fraction = p / HUNDRED
-    up_factor, down_factor = Decimal(1) + fraction, Decimal(1) - fraction
-    if up_factor == 1 or down_factor == 1:
-        raise ValueError("percentage is too small for Decimal precision")
+    if sizing not in ("percentage", "atr"):
+        raise ValueError("sizing must be 'percentage' or 'atr'")
+    p = parse_percent(percentage) if sizing == "percentage" else None
+    tracker = DailyATR(atr_period) if sizing == "atr" else None
+    brick_size = atr_value = atr_as_of = None
+    atr_status = None
+    if p is not None:
+        fraction = p / HUNDRED
+        up_factor, down_factor = Decimal(1) + fraction, Decimal(1) - fraction
+        if up_factor == 1 or down_factor == 1:
+            raise ValueError("percentage is too small for Decimal precision")
     bars = []
+    highs, pending_breakout = RecordHighs(), None
     anchor = span_start = observed = previous = first = None
     pending_count = row_count = missing_intervals = normalized_labels = raw_rows = 0
     sessions = {}
@@ -171,12 +187,12 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
     def ohlc_dict(c):
         return {k: float(getattr(c, k)) for k in ("open", "high", "low", "close")}
 
-    def emit(kind, start, end, known_at, o, close, count, reason, observation=None, trigger=None):
+    def emit(kind, start, end, known_at, o, close, count, reason, observation=None, trigger=None, breakout=None):
         if len(bars) >= 1_000_000:
-            raise ValueError("Output exceeds 1,000,000 bars; choose a larger percentage")
+            raise ValueError("Output exceeds 1,000,000 bars; choose a larger brick size or less source history")
         # For normal bricks this is defined by the exact percentage construction.
         # JSON float price ratios can differ by ordinary floating-point epsilon.
-        move = (p if close > o else -p) if kind == "move" else (close - o) / o * HUNDRED
+        move = (p if close > o else -p) if kind == "move" and p is not None else (close - o) / o * HUNDRED
         bars.append({
             "bar_id": len(bars), "kind": kind,
             "start": start.isoformat(), "end": end.isoformat(), "known_at": known_at.isoformat(),
@@ -186,22 +202,30 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             "direction": "up" if close > o else "down" if close < o else "flat",
             "source_minutes": count,
             "synthetic_ohlc": True, "synthetic_bridge": kind in ("session_gap", "data_gap"),
-            "threshold_reached": kind == "move" or abs(move) >= p,
+            "threshold_reached": kind == "move" or (abs(move) >= p if p is not None else
+                                  brick_size is not None and abs(close - o) >= brick_size),
             "finalized": kind != "partial" or reason != "end_of_input",
             "reason": reason,
+            "ath_breakout": breakout,
             "observed_ohlc": {k: float(v) for k, v in observation.items()} if observation else None,
             "trigger_minute": ({"timestamp": trigger.timestamp.isoformat(), **ohlc_dict(trigger)}
                                if trigger is not None else None),
         })
+        if tracker is not None:
+            bars[-1].update({"brick_size_points": float(brick_size) if brick_size is not None else None,
+                             "atr_value": float(atr_value) if atr_value is not None else None,
+                             "atr_period": tracker.period, "atr_as_of": atr_as_of,
+                             "atr_status": atr_status})
 
     def flush(reason, known_at=None):
-        nonlocal anchor, span_start, pending_count, observed
+        nonlocal anchor, span_start, pending_count, observed, pending_breakout
         if anchor is not None and (pending_count or previous.close != anchor):
             emit("partial", span_start, previous.timestamp + MINUTE,
                  known_at or previous.timestamp + MINUTE, anchor, previous.close,
-                 pending_count, reason, observed, previous)
+                 pending_count, reason, observed, previous, pending_breakout)
         anchor = span_start = observed = None
         pending_count = 0
+        pending_breakout = None
 
     for c in candles:
         validate_candle(c, previous)
@@ -213,33 +237,42 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
         first = first or c
         session = sessions.setdefault(c.timestamp.date(), [c.timestamp, c.timestamp, 0])
         session[1], session[2] = c.timestamp, session[2] + 1
-        if previous is not None:
-            day_changed = c.timestamp.date() != previous.timestamp.date()
-            missing = not day_changed and c.timestamp - previous.timestamp != MINUTE
-            if day_changed or missing:
-                flush("session_end" if day_changed else "missing_minutes", c.timestamp)
-                missing_intervals += int(missing)
-                normal_endpoints = (previous.timestamp.time() == time(15, 29)
-                                    and c.timestamp.time() == time(9, 15))
-                kind = "session_gap" if day_changed and normal_endpoints else "data_gap"
-                reason = ("observed_session_close_to_open" if kind == "session_gap"
-                          else "missing_minutes" if missing else "nonstandard_session_endpoints")
-                if kind == "data_gap" or c.open != previous.close:
-                    emit(kind, previous.timestamp + MINUTE, c.timestamp, c.timestamp,
-                         previous.close, c.open, 0, reason)
+        day_changed = previous is not None and c.timestamp.date() != previous.timestamp.date()
+        missing = previous is not None and not day_changed and c.timestamp - previous.timestamp != MINUTE
+        if day_changed or missing:
+            # Close the prior remainder using its original session's ATR.
+            flush("session_end" if day_changed else "missing_minutes", c.timestamp)
+            missing_intervals += int(missing)
+        if tracker is not None:
+            tracker.observe(c)
+            atr_value, atr_as_of = tracker.value, tracker.as_of
+            brick_size = atr_value if atr_value is not None and atr_value > 0 else None
+            atr_status = "warmup" if atr_value is None else "ready" if brick_size is not None else "zero_atr"
+        if day_changed or missing:
+            normal_endpoints = (previous.timestamp.time() == time(15, 29)
+                                and c.timestamp.time() == time(9, 15))
+            kind = "session_gap" if day_changed and normal_endpoints else "data_gap"
+            reason = ("observed_session_close_to_open" if kind == "session_gap"
+                      else "missing_minutes" if missing else "nonstandard_session_endpoints")
+            if kind == "data_gap" or c.open != previous.close:
+                gap_breakout = highs.observe(c.open, c.timestamp, c.timestamp)
+                emit(kind, previous.timestamp + MINUTE, c.timestamp, c.timestamp,
+                     previous.close, c.open, 0, reason, breakout=gap_breakout)
         if anchor is None:
             anchor, span_start = c.open, c.timestamp
         pending_count += 1
+        pending_breakout = merge_breakouts(pending_breakout, highs.observe(c.high, c.timestamp, c.timestamp + MINUTE))
         if observed is None:
             observed = {"open": c.open, "high": c.high, "low": c.low, "close": c.close}
         else:
             observed["high"] = max(observed["high"], c.high)
             observed["low"] = min(observed["low"], c.low)
             observed["close"] = c.close
-        while True:
-            upper, lower = anchor * up_factor, anchor * down_factor
+        while p is not None or brick_size is not None:
+            upper, lower = ((anchor * up_factor, anchor * down_factor) if p is not None
+                            else (anchor + brick_size, anchor - brick_size))
             if upper == anchor or lower == anchor:
-                raise ValueError("percentage is too small for Decimal precision at this price")
+                raise ValueError("brick size is too small for Decimal precision at this price")
             if c.close >= upper:
                 target = upper
             elif c.close <= lower:
@@ -247,10 +280,13 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
             else:
                 break
             emit("move", span_start, c.timestamp + MINUTE, c.timestamp + MINUTE,
-                 anchor, target, pending_count, "exact_percentage_close_projection", observed, c)
+                 anchor, target, pending_count,
+                 "exact_percentage_close_projection" if p is not None else "prior_daily_atr_close_projection",
+                 observed, c, pending_breakout)
             anchor = target  # KEEP the unused displacement; never reset to c.close/c.open.
             span_start = c.timestamp + MINUTE
             pending_count, observed = 0, None
+            pending_breakout = None
         previous = c
     if first is None:
         raise ValueError("No minute candles supplied")
@@ -259,8 +295,10 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
                  for day, (a, b, n) in sessions.items()
                  if a.time() != time(9, 15) or b.time() != time(15, 29) or n != 375]
     visible = bars if include_partials else [b for b in bars if b["kind"] != "partial"]
-    return {"metadata": {
-        "algorithm_version": "2.2.0", "percentage": float(p), "mode": "exact_percentage_close",
+    result = {"metadata": {
+        "algorithm_version": "2.3.0", "percentage": float(p) if p is not None else None,
+        "mode": "exact_percentage_close" if p is not None else "prior_daily_atr_close",
+        "sizing": sizing,
         "include_partials": include_partials,
         "timezone": "Asia/Kolkata", "timestamp_convention": "minute_start",
         "first_minute": first.timestamp.isoformat(), "last_minute": previous.timestamp.isoformat(),
@@ -272,19 +310,39 @@ def convert_minutes(candles: Iterable[Candle], percentage=1, *, include_partials
         "merged_minute_buckets": merged_buckets,
         "sessions_outside_normal_375_minute_template": irregular,
         "notes": [
-            "1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision.",
+            ("1 means 1%. Each normal move brick has exactly +/-p% body and p% high-low range relative to its own open, within numerical precision."
+             if p is not None else "Full ATR bricks have a point size equal to prior daily ATR; their percentage size varies with price."),
             "Normal OHLC is a synthetic close-based projection without wicks; observed OHLC is separate and never assigned as a brick's high/low.",
-            "Each crossed percentage threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
+            "Each crossed sizing threshold emits a brick; the remaining displacement carries within the session. Reversal uses one brick.",
             "Only minute closes confirm bricks. Multiple bricks from one close share known_at; intraminute crossing times are unknown.",
             "source_minutes counts newly consumed observations; extra bricks from the same minute count zero. Sum counts only with partials included.",
             "Every session starts a fresh anchor. Daily/final residuals are included by default, followed by unsplit gaps. A flat session retains a zero-height partial.",
-            "Remainder percentages use their own open: 100 to 104 with p=3 gives 100 to 103 (+3%) then 103 to 104 (+0.9708737864%), not a rounded +1% brick.",
+            "Every displayed percentage uses its own brick's open. Remainders preserve actual price displacement without rounding to a full brick.",
             "Bridges preserve the full endpoint gap. Gap high/low do not imply a traded path. Session gaps use last observed minute close, not official daily close.",
             "No exchange calendar is applied: missing whole sessions, special sessions and halts cannot be definitively classified.",
             "Pass only completed source minutes. The final end_of_input partial can change as more input arrives.",
             "CSV minute-start IST labels are floored; minute collisions use first/max/min/last unless error policy is selected.",
+            "ATH markers mean strictly new highs within available source history, not verified lifetime highs. The first source high seeds the baseline; ties do not break out.",
+            "Breakouts use observed minute highs (or a gap's opening price), not Renko highs or closing-price confirmation. Events are grouped once onto the brick consuming their observations.",
         ],
     }, "bars": visible}
+    result["metadata"].update(highs.metadata(first.timestamp))
+    if tracker is not None:
+        result["metadata"].update({
+            "atr_period": tracker.period, "atr_timeframe": "1D", "atr_smoothing": "Wilder RMA; SMA seed",
+            "atr_size_policy": "prior eligible session ATR, fixed throughout the next observed session",
+            "atr_eligible_prior_sessions": tracker.used_sessions,
+            "atr_skipped_prior_sessions": tracker.skipped_sessions,
+            "last_atr_points": float(atr_value) if atr_value is not None else None,
+            "last_atr_as_of": atr_as_of,
+        })
+        result["metadata"]["notes"].extend([
+            "ATR uses observed daily H/L/C, not synthetic Renko bricks. Only 375-minute 09:15-15:29 regular sessions enter the ATR calculation.",
+            "TR=max(H-L, abs(H-previous eligible close), abs(L-previous eligible close)); first TR=H-L. Seed with N TRs, then Wilder smoothing.",
+            "Incomplete/nonstandard prior sessions are excluded from ATR; the next eligible TR references the last eligible close. Existing ATR carries across skipped sessions.",
+            "The first N eligible daily candles are warm-up; no invented ATR or full bricks. Daily remainders and gaps remain visible. Zero ATR also emits no full bricks.",
+        ])
+    return result
 
 
 def filter_result(result: dict, start: date | None = None, end: date | None = None,
@@ -331,9 +389,21 @@ def make_chart(result: dict):
             decreasing_line_color=down, decreasing_fillcolor=down,
             hovertext=hover, hoverinfo="text"))
     rows = result["bars"]
+    marked = [(i,b) for i,b in enumerate(rows) if b.get('ath_breakout')]
+    if marked:
+        fig.add_trace(go.Scatter(
+            name="ATH*", mode="markers+text", x=[i for i,b in marked], y=[b['high'] for i,b in marked],
+            marker=dict(color="#eab84f", size=8, symbol="diamond"),
+            text=['' if i and rows[i-1].get('ath_breakout') else 'ATH*' for i,b in marked],
+            textposition="top center",
+            hovertext=[f"Source-history high {b['ath_breakout']['high']} > prior {b['ath_breakout']['previous_high']}"
+                       f"<br>First break {b['ath_breakout']['first_at']}<br>Available source history only"
+                       for i,b in marked], hoverinfo="text"))
     ticks = rows[::max(1, len(rows) // 8)]
+    label = (f"daily ATR({result['metadata']['atr_period']})" if result['metadata'].get('sizing') == 'atr'
+             else f"{result['metadata']['percentage']:g}%")
     fig.update_layout(
-        title=f"NIFTY 50 • {result['metadata']['percentage']:g}% exact close-based bricks",
+        title=f"NIFTY 50 • {label} close-based bricks",
         template="plotly_white", height=680,
         yaxis_title="Index level (calculated brick boundaries)",
         xaxis_title="Sequential blocks • equal spacing, variable elapsed time",
@@ -342,7 +412,7 @@ def make_chart(result: dict):
                    ticktext=[b["end"][:16].replace("T", " ") for b in ticks]),
         legend=dict(orientation="h", y=1.08), margin=dict(b=130),
         annotations=[dict(x=0, y=-0.20, xref="paper", yref="paper", showarrow=False,
-                         text="Blue/purple = full session gaps; amber = unknown intervals; light green/red = remainders.")])
+                         text="Blue/purple = full gaps; amber = unknown intervals; lighter bricks = remainders; gold ATH* = new source-history high.")])
     return fig
 
 
@@ -351,23 +421,26 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
-    app = FastAPI(title="NIFTY percentage OHLC blocks", version="2.2.0")
+    app = FastAPI(title="NIFTY percentage and ATR OHLC blocks", version="2.3.0")
     source = Path(csv_path).resolve()
     static = Path(__file__).with_name("static")
     app.mount("/assets", StaticFiles(directory=static), name="assets")
 
     @lru_cache(maxsize=4)
-    def calculate(p: str, mtime_ns: int, size: int):
+    def calculate(sizing: str, p: str, atr_period: int, mtime_ns: int, size: int):
         # Cache key includes file state; errors are not cached.
-        return convert_minutes(read_minutes(source), p, include_partials=True)
+        return convert_minutes(read_minutes(source), p, include_partials=True, sizing=sizing, atr_period=atr_period)
 
-    def get_result(percentage, start, end, include_partials):
+    def get_result(percentage, start, end, include_partials, sizing, atr_period):
         try:
-            p = parse_percent(percentage)
+            if sizing not in ("percentage", "atr"):
+                raise ValueError("sizing must be 'percentage' or 'atr'")
+            p = str(parse_percent(percentage).normalize()) if sizing == "percentage" else "1"
+            period = parse_atr_period(atr_period) if sizing == "atr" else 14
             if start and end and start > end:
                 raise ValueError("start must be on or before end")
             stat = source.stat()
-            data = calculate(str(p.normalize()), stat.st_mtime_ns, stat.st_size)
+            data = calculate(sizing, p, period, stat.st_mtime_ns, stat.st_size)
             return filter_result(data, start, end, include_partials=include_partials)
         except FileNotFoundError:
             raise HTTPException(503, "CSV missing. Run python nifty_bars.py --download first.")
@@ -376,8 +449,10 @@ def create_app(csv_path: str | Path = DEFAULT_CSV):
 
     @app.get("/bars")
     def bars(percentage: str = Query("1", description="1 or 1% means one percent"),
-             start: date | None = None, end: date | None = None, include_partials: bool = True):
-        return get_result(percentage, start, end, include_partials)
+             start: date | None = None, end: date | None = None, include_partials: bool = True,
+             sizing: str = Query("percentage", description="percentage or atr"),
+             atr_period: int = Query(14, ge=1, description="Daily Wilder ATR length; positive whole number")):
+        return get_result(percentage, start, end, include_partials, sizing, atr_period)
 
     @lru_cache(maxsize=1)
     def calculate_history(mtime_ns: int, size: int):
@@ -412,6 +487,8 @@ def main():
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     parser.add_argument("--download", action="store_true", help="Fetch/refresh the supplied source URL")
     parser.add_argument("--percentage", default="1", help="1 or 1%% means one percent")
+    parser.add_argument("--sizing", choices=("percentage", "atr"), default="percentage", help="Renko brick sizing method")
+    parser.add_argument("--atr-period", type=parse_atr_period, default=14, help="Daily Wilder ATR length (7, 10, 14 or any positive integer)")
     parser.add_argument("--output", type=Path, default=Path("bars.json"))
     parser.add_argument("--html", type=Path, help="Also save an interactive candlestick chart")
     parser.add_argument("--start", type=date.fromisoformat)
@@ -427,7 +504,8 @@ def main():
         import uvicorn
         uvicorn.run(create_app(args.csv), host="127.0.0.1", port=args.port)
         return
-    result = filter_result(convert_minutes(read_minutes(args.csv), args.percentage, include_partials=True),
+    result = filter_result(convert_minutes(read_minutes(args.csv), args.percentage, include_partials=True,
+                                          sizing=args.sizing, atr_period=args.atr_period),
                            args.start, args.end, include_partials=args.include_partials)
     with args.csv.open("rb") as src:
         digest = hashlib.sha256()

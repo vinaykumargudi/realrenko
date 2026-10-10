@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sma, ema, atr, supertrend } from '../static/indicators.mjs';
-import { chartPoints, indexForTime, selectBars, earlierMonth, priceChange } from '../static/chart-data.mjs';
+import { chartPoints, indexForTime, selectBars, earlierMonth, priceChange, breakoutMarkers } from '../static/chart-data.mjs';
 const closeBars = values => values.map(close => ({ open: close, high: close + 1, low: close - 1, close }));
 const almost = (a, b) => assert.ok(Math.abs(a - b) < 1e-10, `${a} vs ${b}`);
 
@@ -53,4 +53,15 @@ test('Date filters, visibility and long-history percentage preserve actual price
   assert.throws(()=>selectBars(bars,{start:'2021-01-01',end:'2020-01-01'}));
   assert.equal(selectBars([{end:'2020-01-01',kind:'partial'}]).length,1);
   assert.equal(selectBars([{end:'2020-01-01',kind:'partial'}],{partials:false}).length,0);
+});
+
+test('ATH markers use supplied source events once per brick, not rising synthetic prices', () => {
+  const bars=[{bar_id:0,close:100}, {bar_id:1,close:110,ath_breakout:{high:120}},
+    {bar_id:2,close:111,ath_breakout:{high:121}}, {bar_id:3,close:200},
+    {bar_id:4,close:190,ath_breakout:{high:210}}];
+  const points=bars.map((_,i)=>({time:100+i}));
+  const markers=breakoutMarkers(bars,points);
+  assert.deepEqual(markers.map(m=>m.time),[101,102,104]);
+  assert.deepEqual(markers.map(m=>m.text),['ATH*','','ATH*']);
+  assert.equal(new Set(markers.map(m=>m.id)).size,3);
 });

@@ -1,0 +1,78 @@
+{
+  "source_sha256": "9b347479bb242e8cea8f85011a4d53e8938c1bfea1697fa25d8ef25d8888784d",
+  "first_date": "2015-01-09",
+  "last_date": "2024-03-27",
+  "source_record_high": 22526.6,
+  "atr_policy": "prior fully observed 375-minute daily sessions; Wilder RMA with SMA seed",
+  "high_policy": "strictly greater source high, including gap opens; first observation is the baseline",
+  "checks": [
+    {
+      "sizing": "percentage",
+      "atr_period": null,
+      "bar_counts": {
+        "partial": 2317,
+        "session_gap": 2257,
+        "move": 1033,
+        "data_gap": 57
+      },
+      "source_minutes_accounted_for": 852083,
+      "sessions_represented": 2282,
+      "connected_adjacent_bricks": 5663,
+      "source_high_events_verified": 4025,
+      "marked_bricks": 355,
+      "maximum_atr_brick_error_points": null,
+      "all_assertions_passed": true
+    },
+    {
+      "sizing": "atr",
+      "atr_period": 7,
+      "bar_counts": {
+        "partial": 2317,
+        "session_gap": 2257,
+        "data_gap": 57,
+        "move": 511
+      },
+      "source_minutes_accounted_for": 852083,
+      "sessions_represented": 2282,
+      "connected_adjacent_bricks": 5141,
+      "source_high_events_verified": 4025,
+      "marked_bricks": 364,
+      "maximum_atr_brick_error_points": 3.240074875066057e-12,
+      "all_assertions_passed": true
+    },
+    {
+      "sizing": "atr",
+      "atr_period": 10,
+      "bar_counts": {
+        "partial": 2317,
+        "session_gap": 2257,
+        "data_gap": 57,
+        "move": 508
+      },
+      "source_minutes_accounted_for": 852083,
+      "sessions_represented": 2282,
+      "connected_adjacent_bricks": 5138,
+      "source_high_events_verified": 4025,
+      "marked_bricks": 363,
+      "maximum_atr_brick_error_points": 3.268496584496461e-12,
+      "all_assertions_passed": true
+    },
+    {
+      "sizing": "atr",
+      "atr_period": 14,
+      "bar_counts": {
+        "partial": 2317,
+        "session_gap": 2257,
+        "data_gap": 57,
+        "move": 496
+      },
+      "source_minutes_accounted_for": 852083,
+      "sessions_represented": 2282,
+      "connected_adjacent_bricks": 5126,
+      "source_high_events_verified": 4025,
+      "marked_bricks": 364,
+      "maximum_atr_brick_error_points": 3.240074875066057e-12,
+      "all_assertions_passed": true
+    }
+  ]
+}
